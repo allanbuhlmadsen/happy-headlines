@@ -1,18 +1,59 @@
+x-db: &db
+  image: postgres:17
+  environment:
+    POSTGRES_DB: articles
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: devpassword
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d articles"]
+    interval: 5s
+    timeout: 5s
+    retries: 10
+    start_period: 30s
+
+x-db-ready: &db-ready
+  condition: service_healthy
+
 services:
+  db-africa:
+    <<: *db
+  db-antarctica:
+    <<: *db
+  db-asia:
+    <<: *db
   db-europe:
-    image: postgres:17
-    environment:
-      POSTGRES_DB: articles
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: devpassword
+    <<: *db
+  db-northamerica:
+    <<: *db
+  db-oceania:
+    <<: *db
+  db-southamerica:
+    <<: *db
+  db-global:
+    <<: *db
 
   articleservice:
     build:
       context: .
       dockerfile: ArticleService/Dockerfile
     environment:
-      ConnectionStrings__Articles: "Host=db-europe;Port=5432;Database=articles;Username=postgres;Password=devpassword"
+      Databases__Template: "Host={host};Port=5432;Database=articles;Username=postgres;Password=devpassword"
+      Databases__Continents: "africa,antarctica,asia,europe,northamerica,oceania,southamerica,global"
+    depends_on:
+      db-africa: *db-ready
+      db-antarctica: *db-ready
+      db-asia: *db-ready
+      db-europe: *db-ready
+      db-northamerica: *db-ready
+      db-oceania: *db-ready
+      db-southamerica: *db-ready
+      db-global: *db-ready
+
+  loadbalancer:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "8080:8080"
     depends_on:
-      - db-europe
+      - articleservice

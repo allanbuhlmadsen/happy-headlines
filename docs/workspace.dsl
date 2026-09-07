@@ -1,4 +1,4 @@
-workspace "Happy Headlines" "C4 model, levels 1 and 2" {
+workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
     !impliedRelationships false
     model {
         # ---------- People ----------
@@ -69,11 +69,50 @@ workspace "Happy Headlines" "C4 model, levels 1 and 2" {
         # ---------- Relationships: filtering ----------
         profanityService -> profanityDatabase "Retrieves and removes prohibited words"
 
-                # ---------- System-level relationships (level 1) ----------
+        # ---------- System-level relationships (level 1) ----------
         # Implied relationships are disabled, so these are stated explicitly.
         publisher -> happyHeadlines "Drafts and publishes articles"
         reader -> happyHeadlines "Reads articles, posts comments, and subscribes to the newsletter"
         happyHeadlines -> emailSystem "Sends the newsletter"
+
+        # ---------- Deployment ----------
+        deploymentEnvironment "Docker Compose" {
+            deploymentNode "Developer machine" "" "Docker Compose" {
+
+                loadBalancer = infrastructureNode "loadbalancer" "Distributes requests across the service instances, round robin." "Nginx"
+
+                deploymentNode "articleservice" "X-axis split: three identical instances." "Docker container" "" 3 {
+                    serviceInstance = containerInstance articleService
+                }
+
+                deploymentNode "db-africa" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-antarctica" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-asia" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-europe" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-northamerica" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-oceania" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-southamerica" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+                deploymentNode "db-global" "" "Docker container" {
+                    containerInstance articleDatabase
+                }
+            }
+
+            loadBalancer -> serviceInstance "Forwards requests to"
+        }
     }
 
     views {
@@ -83,6 +122,11 @@ workspace "Happy Headlines" "C4 model, levels 1 and 2" {
         }
 
         container happyHeadlines "Level2_Containers" "The system's containers and how they interact." {
+            include *
+            autolayout lr
+        }
+
+        deployment happyHeadlines "Docker Compose" "Deployment" "How ArticleService and its databases are actually run." {
             include *
             autolayout lr
         }

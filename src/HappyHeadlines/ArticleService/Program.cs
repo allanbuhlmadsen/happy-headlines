@@ -9,8 +9,9 @@ namespace ArticleService
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
-            builder.Services.AddDbContext<ArticleDbContext>(options =>
-                options.UseNpgsql(builder.Configuration.GetConnectionString("Articles")));
+            builder.Services.AddDbContextFactory<ArticleDbContext>();
+
+            builder.Services.AddSingleton<ContinentDbContextFactory>();
 
             // Add services to the container.
 
@@ -22,8 +23,13 @@ namespace ArticleService
 
             using (var scope = app.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<ArticleDbContext>();
-                db.Database.Migrate();
+                var factory = scope.ServiceProvider.GetRequiredService<ContinentDbContextFactory>();
+
+                foreach (var continent in factory.Continents)
+                {
+                    using var db = factory.Create(continent);
+                    db.Database.Migrate();
+                }
             }
 
             // Configure the HTTP request pipeline.

@@ -1,32 +1,35 @@
 @base = http://localhost:8080
 
-### Create
-POST {{base}}/articles
+### Create in Europe
+POST {{base}}/continents/europe/articles
 Content-Type: application/json
 
 {
-  "title": "Local library saves stray kittens",
-  "body": "A small town library has taken in six kittens found in the returns bin.",
+  "title": "Copenhagen opens new harbour bath",
+  "body": "The city has opened its fifth public swimming spot in the harbour.",
   "author": "Jane Doe",
   "publishedAt": "2026-09-07T10:00:00Z"
 }
 
-### Get all
-GET {{base}}/articles
-
-### Get by id
-GET {{base}}/articles/1
-
-### Update
-PUT {{base}}/articles/1
+### Create in Asia
+POST {{base}}/continents/asia/articles
 Content-Type: application/json
 
 {
-  "title": "Local library saves seven stray kittens",
-  "body": "A small town library has taken in seven kittens found in the returns bin.",
-  "author": "Jane Doe",
-  "publishedAt": "2026-09-07T10:00:00Z"
+  "title": "Tokyo park plants a thousand cherry trees",
+  "body": "Volunteers spent the weekend planting along the riverbank.",
+  "author": "John Smith",
+  "publishedAt": "2026-09-07T11:00:00Z"
 }
 
-### Delete
-DELETE {{base}}/articles/1
+### All in Europe
+GET {{base}}/continents/europe/articles
+
+### All in Asia
+GET {{base}}/continents/asia/articles
+
+### All in Africa
+GET {{base}}/continents/africa/articles
+
+### Invalid continent
+GET {{base}}/continents/atlantis/articles
