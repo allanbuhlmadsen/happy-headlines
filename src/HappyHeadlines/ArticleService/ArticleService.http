@@ -1,0 +1,32 @@
+@base = http://localhost:8080
+
+### Create
+POST {{base}}/articles
+Content-Type: application/json
+
+{
+  "title": "Local library saves stray kittens",
+  "body": "A small town library has taken in six kittens found in the returns bin.",
+  "author": "Jane Doe",
+  "publishedAt": "2026-09-07T10:00:00Z"
+}
+
+### Get all
+GET {{base}}/articles
+
+### Get by id
+GET {{base}}/articles/1
+
+### Update
+PUT {{base}}/articles/1
+Content-Type: application/json
+
+{
+  "title": "Local library saves seven stray kittens",
+  "body": "A small town library has taken in seven kittens found in the returns bin.",
+  "author": "Jane Doe",
+  "publishedAt": "2026-09-07T10:00:00Z"
+}
+
+### Delete
+DELETE {{base}}/articles/1

@@ -1,0 +1,18 @@
+services:
+  db-europe:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: articles
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpassword
+
+  articleservice:
+    build:
+      context: .
+      dockerfile: ArticleService/Dockerfile
+    environment:
+      ConnectionStrings__Articles: "Host=db-europe;Port=5432;Database=articles;Username=postgres;Password=devpassword"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db-europe
