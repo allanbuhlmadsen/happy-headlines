@@ -4,4 +4,6 @@
     <File Path="nginx/nginx.conf" />
   </Folder>
   <Project Path="ArticleService/ArticleService.csproj" />
+  <Project Path="CommentService/CommentService.csproj" Id="0b7dafde-f946-48f8-bd49-b46de2ddabdb" />
+  <Project Path="ProfanityService/ProfanityService.csproj" Id="5000fc18-336c-4da9-8108-c9fdc47f2265" />
 </Solution>

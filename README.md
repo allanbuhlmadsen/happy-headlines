@@ -13,7 +13,9 @@ Architecture and implementation work for the Happy Headlines semester project.
     └── HappyHeadlines/
         ├── HappyHeadlines.slnx
         ├── docker-compose.yml
-        ├── ArticleService/    ASP.NET Core Web API
+        ├── ArticleService/    Articles (Week 2)
+        ├── CommentService/    Comments (Week 3)
+        ├── ProfanityService/  Profanity filtering (Week 3)
         └── nginx/             Load balancer configuration
 ```
 
@@ -353,9 +355,194 @@ ordered without it.
 separate input model would be cleaner — the current version relies on the
 controller overwriting `Id` and `Continent` rather than refusing to accept them.
 
-## Known gaps
+## Known gaps (Week 2)
 
 - The ArticleQueue subscription from the Week 1 model is not implemented; this
   week's requirements do not mention it
 - The database password is committed in plain text. This is acceptable for a local
   development database with no real data, but is not a pattern to carry forward
+
+---
+
+# Week 3 — CommentService, ProfanityService, and a circuit breaker
+
+Three requirements: implement CommentService and ProfanityService with their own
+databases; isolate them from each other following swimlane principles, with the two
+services communicating directly rather than through a gateway; and put a circuit
+breaker in CommentService for when ProfanityService is unavailable.
+
+## How to run
+
+Unchanged from Week 2. From `src/HappyHeadlines`:
+
+```
+docker compose up --scale articleservice=3
+```
+
+Fourteen containers start: eleven databases, three ArticleService instances, the
+load balancer, ProfanityService and CommentService.
+
+| Service | Port on the host |
+|---|---|
+| ArticleService (via load balancer) | 8080 |
+| ProfanityService | 8082 |
+| CommentService | 8083 |
+
+## API
+
+**ProfanityService** — `/profanity`:
+
+| Method | Route | Action |
+|---|---|---|
+| `POST` | `/profanity/filter` | Returns the text with prohibited words replaced |
+| `GET` | `/profanity/words` | Lists the prohibited words |
+| `POST` | `/profanity/words` | Adds a word |
+| `DELETE` | `/profanity/words/{id}` | Removes a word |
+
+**CommentService** — comments are scoped to an article:
+
+| Method | Route | Action |
+|---|---|---|
+| `GET` | `/articles/{continent}/{articleId}/comments` | Lists comments on that article |
+| `POST` | `/articles/{continent}/{articleId}/comments` | Posts a comment |
+| `DELETE` | `/articles/{continent}/{articleId}/comments/{id}` | Deletes a comment |
+
+## The tension in the assignment, and how it is resolved
+
+Swimlane isolation normally means no synchronous calls between lanes: if
+CommentService waits on ProfanityService, a hang in one hangs the other, which is
+exactly the coupling lanes exist to remove.
+
+The assignment nonetheless requires the two services to call each other directly,
+with no gateway in between. That is not a contradiction — it is why the circuit
+breaker is part of the same assignment. The breaker is what restores the isolation
+that a synchronous call would otherwise destroy: after a few failures it stops
+trying, fails fast, and recovers on its own.
+
+What is isolated, concretely:
+
+- Each service owns exactly one database; neither can reach the other's
+- Neither service shares code, a process, or a container with the other
+- The call goes to `http://profanityservice:8080` directly on the internal Docker
+  network — not through the load balancer, which serves ArticleService only
+- CommentService has no `depends_on` for ProfanityService: it must be able to start
+  and run without it
+
+## The circuit breaker
+
+Implemented with `Microsoft.Extensions.Http.Resilience`, which builds on Polly, and
+attached to the `HttpClient` that CommentService uses to reach ProfanityService.
+
+| Setting | Value | Meaning |
+|---|---|---|
+| `FailureRatio` | 0.5 | Opens when half the calls in the window fail |
+| `MinimumThroughput` | 4 | At least four calls before it counts at all |
+| `SamplingDuration` | 30s | The window it looks back over |
+| `BreakDuration` | 15s | How long it stays open before probing again |
+| `Timeout` | 5s | How long a single call may take |
+
+The values are deliberately low so the behaviour can be demonstrated without
+waiting minutes.
+
+### Measured behaviour
+
+With ProfanityService stopped:
+
+| | Response time | Status |
+|---|---|---|
+| Before the breaker opens | ~1.4 s | 503 |
+| After the breaker opens | 2–3 ms | 503 |
+
+The difference is the point. Once open, CommentService stops attempting a call it
+knows will fail, so it neither waits nor holds a connection open. Bringing
+ProfanityService back requires no intervention: after `BreakDuration` the breaker
+probes, succeeds, and closes itself.
+
+## Design decisions
+
+### 1. When the breaker is open, the comment is rejected
+
+Four options were considered: reject the comment, accept it unfiltered, store it
+unpublished until it can be filtered, or fall back to a local word list.
+
+Accepting unfiltered would let profanity onto a site whose entire premise is
+positive news, and would make the breaker pointless — if the answer is "do nothing",
+the call could simply fail silently. A local fallback list would put filtering logic
+in two places, which is what ProfanityService exists to prevent. Storing unpublished
+comments is the right answer for production, but requires a background process to
+filter them later, which this week's requirements do not ask for.
+
+Rejecting is honest and simple, and it is what the breaker is actually for. The
+response is 503 with a message saying to try again shortly, rather than a bare 500,
+so it is a communicated decision rather than a crash.
+
+The trade-off is real and worth naming: this isolates resource consumption, not the
+user experience. A reader still cannot comment while ProfanityService is down.
+Storing unpublished comments would fix that, and is the intended next step.
+
+### 2. ProfanityService filters text rather than handing out the word list
+
+The alternative was an endpoint returning the prohibited words, with CommentService
+doing the matching. That would put the filtering logic in the caller and leave
+ProfanityService as a database with a URL in front of it — the swimlane would carry
+no responsibility.
+
+The Week 1 description also has PublisherService using ProfanityService. With
+filtering inside the service, that logic exists once rather than in every caller.
+
+### 3. Whole words only, replaced with asterisks
+
+`damn` is matched; `damned` is not. Substring matching would also catch `ass` inside
+`classic` and `passage` — the classic failure of naive profanity filters. Fewer
+matches is the better failure.
+
+Matches are replaced with one asterisk per letter rather than removed, so the
+sentence keeps its shape and the censoring is visible. Matching ignores case; words
+are stored lowercase.
+
+### 4. Comments store the filtered text, not the original
+
+The original wording cannot be recovered. Storing both would mean keeping the
+profanity in the database, which defeats the purpose of filtering it.
+
+### 5. A comment identifies its article by continent and id
+
+Article ids are only unique within one continent's database, a consequence of the
+Week 2 Z-axis split. A comment therefore stores both `ArticleContinent` and
+`ArticleId`; either alone is ambiguous.
+
+The assignment does not mention this. It follows from the previous week's design.
+
+### 6. The two services duplicate the request and response types
+
+`FilterRequest` and `FilterResponse` are defined separately in each service rather
+than shared through a common library. The duplication is deliberate: a shared
+library would couple the two services at build time, which works against the
+isolation the swimlanes are meant to provide.
+
+### 7. Neither new service is split on the X or Z axis
+
+The assignment asks for fault isolation, not scaling, so each runs as a single
+instance with a single database. Adding eight comment databases would obscure what
+is actually being assessed.
+
+This means the compose file now contains two patterns side by side: ArticleService
+scaled and partitioned, the two new services neither. That is a deliberate
+difference, not an oversight.
+
+If CommentService is scaled later, note that each instance keeps its own circuit
+breaker state in memory. They would open independently and discover an outage
+separately. That is the usual arrangement, but it is worth knowing.
+
+### 8. ProfanityService exposes a host port
+
+Port 8082 is published so the word list can be maintained and the filter tested
+during development. This does not weaken the isolation — CommentService still calls
+the service directly on the internal network regardless — but the port is not
+required by the design and could be removed.
+
+## Known gaps (Week 3)
+
+- Comments rejected while the breaker is open are lost; the caller has to resend
+- There is no authentication on the word-list endpoints
+- The word list is fetched from the database on every filter call, with no caching

@@ -32,6 +32,32 @@ services:
   db-global:
     <<: *db
 
+  db-profanity:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: profanity
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d profanity"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  db-comments:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: comments
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d comments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   articleservice:
     build:
       context: .
@@ -57,3 +83,26 @@ services:
       - "8080:8080"
     depends_on:
       - articleservice
+
+  profanityservice:
+    build:
+      context: .
+      dockerfile: ProfanityService/Dockerfile
+    environment:
+      ConnectionStrings__Profanity: "Host=db-profanity;Port=5432;Database=profanity;Username=postgres;Password=devpassword"
+    ports:
+      - "8082:8080"
+    depends_on:
+      db-profanity: *db-ready
+
+  commentservice:
+    build:
+      context: .
+      dockerfile: CommentService/Dockerfile
+    environment:
+      ConnectionStrings__Comments: "Host=db-comments;Port=5432;Database=comments;Username=postgres;Password=devpassword"
+      Services__Profanity: "http://profanityservice:8080"
+    ports:
+      - "8083:8080"
+    depends_on:
+      db-comments: *db-ready

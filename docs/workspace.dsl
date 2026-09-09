@@ -109,6 +109,21 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
                 deploymentNode "db-global" "" "Docker container" {
                     containerInstance articleDatabase
                 }
+                deploymentNode "profanityservice" "Own swimlane. No load balancer in front." "Docker container" {
+                    profanityInstance = containerInstance profanityService
+                }
+
+                deploymentNode "db-profanity" "" "Docker container" {
+                    containerInstance profanityDatabase
+                }
+
+                deploymentNode "commentservice" "Own swimlane. Calls ProfanityService directly, behind a circuit breaker." "Docker container" {
+                    commentInstance = containerInstance commentService
+                }
+
+                deploymentNode "db-comments" "" "Docker container" {
+                    containerInstance commentDatabase
+                }
             }
 
             loadBalancer -> serviceInstance "Forwards requests to"
@@ -126,7 +141,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             autolayout lr
         }
 
-        deployment happyHeadlines "Docker Compose" "Deployment" "How ArticleService and its databases are actually run." {
+        deployment happyHeadlines "Docker Compose" "Deployment" "How the services and their databases are actually run." {
             include *
             autolayout lr
         }

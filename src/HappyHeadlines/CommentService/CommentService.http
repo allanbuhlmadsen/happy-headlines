@@ -1,0 +1,25 @@
+@base = http://localhost:8083
+
+### Post a comment
+POST {{base}}/articles/europe/1/comments
+Content-Type: application/json
+
+{
+  "author": "Jane Doe",
+  "body": "What a lovely story about the kittens."
+}
+
+### Post a comment with profanity — NOT filtered yet
+POST {{base}}/articles/europe/1/comments
+Content-Type: application/json
+
+{
+  "author": "John Smith",
+  "body": "Damn, what a hell of a good story!"
+}
+
+### Get comments for that article
+GET {{base}}/articles/europe/1/comments
+
+### Get comments for a different article — should be empty
+GET {{base}}/articles/asia/1/comments
