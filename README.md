@@ -33,7 +33,9 @@ and the container level. No implementation.
 | 1 — System Context | `docs/images/Level1_Context.png` | `docs/images/Level1_Context-key.png` |
 | 2 — Containers | `docs/images/Level2_Containers.png` | `docs/images/Level2_Containers-key.png` |
 
-A third diagram, added in Week 2, is described under "Deployment" below.
+A third diagram, added in Week 2, is described under "Deployment" below. Levels 1
+and 2 were extended with monitoring in Week 4, described under "Week 4 — Design
+to be monitored" at the end of this file.
 
 All three are generated from a single model in `docs/workspace.dsl`, written in
 Structurizr DSL (a text format for describing C4 models). The key files explain
@@ -45,7 +47,11 @@ Online, without installing anything:
 
 1. Open <https://structurizr.com/dsl>
 2. Clear the editor and paste the contents of `docs/workspace.dsl`
-3. Generate, then switch between the two views
+3. Generate, then switch between the three views
+
+Note that the Structurizr cloud service, including this online editor and the
+`theme default` used by the workspace, reaches its end of life on 30 September 2026.
+After that date use the local option below.
 
 Locally with Docker:
 
@@ -58,10 +64,11 @@ Week 2 load balancer, so do not run both at once.
 
 ## Model overview
 
-Two people use the system: the **Publisher**, who drafts and publishes articles,
-and the **Reader**, who reads articles, comments, and subscribes to the newsletter.
+Three people use the system: the **Publisher**, who drafts and publishes articles,
+the **Reader**, who reads articles, comments, and subscribes to the newsletter, and
+the **Operator**, the developer on call who watches the monitoring dashboard.
 
-The system contains 16 containers:
+The system contains 17 containers:
 
 - **Front ends (2)** — Webapp, Website
 - **Services (7)** — DraftService, PublisherService, ProfanityService,
@@ -69,8 +76,10 @@ The system contains 16 containers:
 - **Queues (2)** — ArticleQueue, SubscriberQueue
 - **Databases (5)** — DraftDatabase, ArticleDatabase, CommentDatabase,
   ProfanityDatabase, SubscriberDatabase
+- **Monitoring (1)** — TelemetryCollector
 
-One external system: an **Email System** that delivers the newsletter.
+Two external systems: an **Email System** that delivers the newsletter, and a
+**Monitoring System** that stores and shows metrics, logs, and traces.
 
 ## Notation
 
@@ -113,7 +122,7 @@ creates only one per pair of elements. The Reader interacts with the Website in
 three ways, so the derived version showed only the first of them — a context
 diagram implying the Reader does nothing but read.
 
-Derivation is therefore switched off (`!impliedRelationships false`), and all three
+Derivation is therefore switched off (`!impliedRelationships false`), and all
 level 1 relationships are stated explicitly in the model. This means level 1 and
 level 2 are maintained separately: a new interaction added at the container level
 will not appear on the context diagram unless it is added there too.
@@ -143,6 +152,9 @@ whom.
 
 Container technology fields are left empty. The description names no languages,
 frameworks, or database engines, so filling them in would be invention.
+
+The one exception is TelemetryCollector, added in Week 4. It is an existing
+product rather than something we build, so its technology is known and stated.
 
 ---
 
@@ -546,3 +558,74 @@ required by the design and could be removed.
 - Comments rejected while the breaker is open are lost; the caller has to resend
 - There is no authentication on the word-list endpoints
 - The word list is fetched from the database on every filter call, with no caching
+
+---
+
+# Week 4 — Design to be monitored
+
+The C4 model from Week 1 is extended so the system can be monitored: every
+service must be able to report metrics, logs, and traces, and someone must be able
+to see them and be alerted when something goes wrong.
+
+## What was added
+
+**Level 1 — System Context**
+
+- **Operator** (person): the developer on call who watches the dashboard and
+  handles incidents
+- **Monitoring System** (external software system): stores metrics, logs, and
+  traces, shows the dashboard, and sends alerts
+- Happy Headlines sends metrics, logs, and traces to the Monitoring System; the
+  Operator watches the dashboard in it, and it alerts the Operator about incidents
+
+**Level 2 — Containers**
+
+- **TelemetryCollector** (container): collects metrics, logs, and traces from all
+  services and forwards them to the Monitoring System
+- All nine front ends and services send their metrics, logs, and traces to
+  TelemetryCollector
+- The Operator and the Monitoring System are shown outside the system boundary
+
+The deployment diagram is unchanged.
+
+## Design decisions
+
+### 1. Buy, do not build
+
+Monitoring is not what Happy Headlines exists to do, so it is built from existing
+products rather than written by us. Both new elements say so in their description.
+
+- **Monitoring System** — the Grafana stack, which can store metrics, logs, and
+  traces, show them on a dashboard, and alert when a value crosses a limit
+- **TelemetryCollector** — the OpenTelemetry Collector, which receives all three
+  kinds of data and forwards them
+
+### 2. One collector inside the system, not one arrow per service to the outside
+
+Each service knows a single address, the collector's. Where the data ends up is
+decided in one place, so the Monitoring System can be replaced without touching the
+services. It also keeps level 1 readable: Happy Headlines has one relationship to
+the Monitoring System rather than one per service.
+
+### 3. The Monitoring System is external
+
+It sits outside the system boundary, like the Email System, because it is a
+separate product that Happy Headlines only uses.
+
+### 4. Databases and queues have no arrow to the collector
+
+Only the front ends and services send data themselves. The figures for databases
+and queues are fetched by the monitoring tools, so drawing arrows from them would
+suggest those containers do work they do not do.
+
+### 5. The Operator is included explicitly
+
+`include *` only shows people with a relationship to the element in focus. The
+Operator only interacts with the Monitoring System, so both views contain
+`include operator`; without it the Operator would be missing from both diagrams.
+
+## Known gaps (Week 4)
+
+- The monitoring is modelled, not implemented; no service sends data yet
+- The container diagram has many crossing arrows now that nine containers point to
+  TelemetryCollector

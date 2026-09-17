@@ -4,9 +4,11 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         # ---------- People ----------
         publisher = person "Publisher" "Journalist or editor who drafts and publishes articles."
         reader = person "Reader" "Reads articles, posts comments, and subscribes to the newsletter."
+        operator = person "Operator" "Developer on call who watches the monitoring dashboard and handles incidents."
 
         # ---------- External systems ----------
         emailSystem = softwareSystem "Email System" "Delivers the newsletter to subscribers' inboxes." "External"
+        monitoringSystem = softwareSystem "Monitoring System" "Bought, not built (Grafana stack). Stores metrics, logs, and traces, shows the dashboard, and sends alerts." "External"
 
         # ---------- Happy Headlines ----------
         happyHeadlines = softwareSystem "Happy Headlines" "Positive news platform: drafting, publishing, reading, commenting, and the newsletter." {
@@ -23,6 +25,9 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             commentService = container "CommentService" "Receives, filters, and stores comments."
             subscriberService = container "SubscriberService" "Handles sign-ups and subscriber data."
             newsletterService = container "NewsletterService" "Assembles and sends the daily newsletter."
+
+            # --- Monitoring ---
+            telemetryCollector = container "TelemetryCollector" "Bought, not built (OpenTelemetry Collector). Collects metrics, logs, and traces from all services and forwards them." "OpenTelemetry Collector"
 
             # --- Queues ---
             articleQueue = container "ArticleQueue" "Carries approved articles from publishing to storage." "" "Queue"
@@ -69,11 +74,26 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         # ---------- Relationships: filtering ----------
         profanityService -> profanityDatabase "Retrieves and removes prohibited words"
 
+        # ---------- Relationships: monitoring ----------
+        webapp -> telemetryCollector "Sends metrics, logs, and traces to"
+        website -> telemetryCollector "Sends metrics, logs, and traces to"
+        draftService -> telemetryCollector "Sends metrics, logs, and traces to"
+        publisherService -> telemetryCollector "Sends metrics, logs, and traces to"
+        profanityService -> telemetryCollector "Sends metrics, logs, and traces to"
+        articleService -> telemetryCollector "Sends metrics, logs, and traces to"
+        commentService -> telemetryCollector "Sends metrics, logs, and traces to"
+        subscriberService -> telemetryCollector "Sends metrics, logs, and traces to"
+        newsletterService -> telemetryCollector "Sends metrics, logs, and traces to"
+        telemetryCollector -> monitoringSystem "Forwards metrics, logs, and traces to"
+        operator -> monitoringSystem "Watches the dashboard in"
+        monitoringSystem -> operator "Alerts about incidents"
+
         # ---------- System-level relationships (level 1) ----------
         # Implied relationships are disabled, so these are stated explicitly.
         publisher -> happyHeadlines "Drafts and publishes articles"
         reader -> happyHeadlines "Reads articles, posts comments, and subscribes to the newsletter"
         happyHeadlines -> emailSystem "Sends the newsletter"
+        happyHeadlines -> monitoringSystem "Sends metrics, logs, and traces to"
 
         # ---------- Deployment ----------
         deploymentEnvironment "Docker Compose" {
@@ -133,11 +153,13 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
     views {
         systemContext happyHeadlines "Level1_Context" "The system's users and its surroundings." {
             include *
+            include operator
             autolayout lr
         }
 
         container happyHeadlines "Level2_Containers" "The system's containers and how they interact." {
             include *
+            include operator
             autolayout lr
         }
 
