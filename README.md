@@ -16,6 +16,8 @@ Architecture and implementation work for the Happy Headlines semester project.
         ├── ArticleService/    Articles (Week 2)
         ├── CommentService/    Comments (Week 3)
         ├── ProfanityService/  Profanity filtering (Week 3)
+        ├── DraftService/      Drafts, with logging and tracing (Week 4)
+        ├── Observability/     Shared Serilog and OpenTelemetry setup (Week 4)
         └── nginx/             Load balancer configuration
 ```
 
@@ -34,8 +36,8 @@ and the container level. No implementation.
 | 2 — Containers | `docs/images/Level2_Containers.png` | `docs/images/Level2_Containers-key.png` |
 
 A third diagram, added in Week 2, is described under "Deployment" below. Levels 1
-and 2 were extended with monitoring in Week 4, described under "Week 4 — Design
-to be monitored" at the end of this file.
+and 2 were extended with logging and tracing in Week 4, described under "Week 4 —
+Design to be monitored" at the end of this file.
 
 All three are generated from a single model in `docs/workspace.dsl`, written in
 Structurizr DSL (a text format for describing C4 models). The key files explain
@@ -66,9 +68,9 @@ Week 2 load balancer, so do not run both at once.
 
 Three people use the system: the **Publisher**, who drafts and publishes articles,
 the **Reader**, who reads articles, comments, and subscribes to the newsletter, and
-the **Operator**, the developer on call who watches the monitoring dashboard.
+the **Operator**, the developer on call who reads the log entries and traces.
 
-The system contains 17 containers:
+The system contains 16 containers:
 
 - **Front ends (2)** — Webapp, Website
 - **Services (7)** — DraftService, PublisherService, ProfanityService,
@@ -76,10 +78,9 @@ The system contains 17 containers:
 - **Queues (2)** — ArticleQueue, SubscriberQueue
 - **Databases (5)** — DraftDatabase, ArticleDatabase, CommentDatabase,
   ProfanityDatabase, SubscriberDatabase
-- **Monitoring (1)** — TelemetryCollector
 
-Two external systems: an **Email System** that delivers the newsletter, and a
-**Monitoring System** that stores and shows metrics, logs, and traces.
+Three external systems: an **Email System** that delivers the newsletter, **Seq**,
+which stores and shows log entries, and **Zipkin**, which stores and shows traces.
 
 ## Notation
 
@@ -153,8 +154,9 @@ whom.
 Container technology fields are left empty. The description names no languages,
 frameworks, or database engines, so filling them in would be invention.
 
-The one exception is TelemetryCollector, added in Week 4. It is an existing
-product rather than something we build, so its technology is known and stated.
+Week 4 adds the first exceptions. DraftService is built this week, so its
+technology (REST API) is stated, and so is the technology of the Observability
+library it uses.
 
 ---
 
@@ -563,69 +565,130 @@ required by the design and could be removed.
 
 # Week 4 — Design to be monitored
 
-The C4 model from Week 1 is extended so the system can be monitored: every
-service must be able to report metrics, logs, and traces, and someone must be able
-to see them and be alerted when something goes wrong.
+Two parts this week. The C4 model is extended so the system can be monitored, and
+DraftService and DraftDatabase are built with logging and tracing from the start.
 
-## What was added
+## Part 1 — The C4 model
 
 **Level 1 — System Context**
 
-- **Operator** (person): the developer on call who watches the dashboard and
-  handles incidents
-- **Monitoring System** (external software system): stores metrics, logs, and
-  traces, shows the dashboard, and sends alerts
-- Happy Headlines sends metrics, logs, and traces to the Monitoring System; the
-  Operator watches the dashboard in it, and it alerts the Operator about incidents
+- **Operator** (person): the developer on call who reads the log entries and
+  traces and handles incidents
+- **Seq** (external software system): stores the structured log entries and shows
+  them in a browser
+- **Zipkin** (external software system): stores the traces and shows each request
+  as a timeline
+- Happy Headlines sends log entries to Seq and traces to Zipkin; the Operator
+  reads them in each of the two
 
 **Level 2 — Containers**
 
-- **TelemetryCollector** (container): collects metrics, logs, and traces from all
-  services and forwards them to the Monitoring System
-- All nine front ends and services send their metrics, logs, and traces to
-  TelemetryCollector
-- The Operator and the Monitoring System are shown outside the system boundary
+- **DraftService** sends its log entries to Seq and its traces to Zipkin
+- The Operator, Seq and Zipkin are shown outside the system boundary
 
 The deployment diagram is unchanged.
+
+## Part 2 — DraftService and DraftDatabase
+
+**DraftService** is a REST API with five endpoints:
+
+| Method and path | What it does |
+| --- | --- |
+| `GET /drafts` | All drafts, most recently updated first |
+| `GET /drafts/{id}` | One draft |
+| `POST /drafts` | Creates a draft |
+| `PUT /drafts/{id}` | Updates a draft |
+| `DELETE /drafts/{id}` | Deletes a draft |
+
+A draft has a title, a body, an author, and the two timestamps `CreatedAt` and
+`UpdatedAt`, which the service sets itself. **DraftDatabase** is a PostgreSQL 17
+container named `db-drafts`, with the same health check as the other databases, so
+DraftService waits until it is ready.
+
+**Observability** is a class library shared by the services. A service gets
+logging and tracing by calling `builder.AddObservability("<service name>")` and
+`app.UseObservability()` in its `Program.cs`, and nothing else.
+
+| Tool | Role |
+| --- | --- |
+| Serilog | Writes structured log entries in the services |
+| Seq | Stores the log entries and shows them, on port 5341 |
+| OpenTelemetry | Produces traces in the services |
+| Zipkin | Stores the traces and shows them, on port 9411 |
 
 ## Design decisions
 
 ### 1. Buy, do not build
 
-Monitoring is not what Happy Headlines exists to do, so it is built from existing
-products rather than written by us. Both new elements say so in their description.
+Monitoring is not what Happy Headlines exists to do, so the storage and the user
+interfaces are existing products: Seq for log entries, Zipkin for traces. Both say
+so in their description in the model. Only the setup that connects the services to
+them is written by us.
 
-- **Monitoring System** — the Grafana stack, which can store metrics, logs, and
-  traces, show them on a dashboard, and alert when a value crosses a limit
-- **TelemetryCollector** — the OpenTelemetry Collector, which receives all three
-  kinds of data and forwards them
+### 2. Logs and traces go to separate products
 
-### 2. One collector inside the system, not one arrow per service to the outside
+Serilog and Seq belong together, and so do OpenTelemetry and Zipkin, so each type
+of data goes where its tooling is strongest. The two are tied together instead:
+every log entry carries the `TraceId` and `SpanId` that OpenTelemetry assigned to
+the request, so a log entry in Seq can be looked up as a trace in Zipkin.
 
-Each service knows a single address, the collector's. Where the data ends up is
-decided in one place, so the Monitoring System can be replaced without touching the
-services. It also keeps level 1 readable: Happy Headlines has one relationship to
-the Monitoring System rather than one per service.
+### 3. Shared infrastructure code, not shared domain code
 
-### 3. The Monitoring System is external
+Week 3, decision 6 deliberately avoided shared code between services. The
+Observability library is an exception, and a narrow one: it contains setup only —
+no business logic and no data types that two services could come to depend on each
+other through. The alternative is the same setup copied into every service, where
+changing where the data is sent means editing all of them. The assignment also
+asks for something reusable across the architecture.
 
-It sits outside the system boundary, like the Email System, because it is a
-separate product that Happy Headlines only uses.
+### 4. What is logged, and when
 
-### 4. Databases and queues have no arrow to the collector
+| Level | Used for | Example |
+| --- | --- | --- |
+| Information | Something succeeded that is worth knowing afterwards | Draft 12 was created |
+| Warning | The call failed because of the caller, not the system | Draft 99 does not exist |
+| Error | The system could not do its work | The database does not answer |
 
-Only the front ends and services send data themselves. The figures for databases
-and queues are fetched by the monitoring tools, so drawing arrows from them would
-suggest those containers do work they do not do.
+Debug is switched off. ASP.NET Core and Entity Framework Core are turned down to
+warnings, since they log a great deal about themselves.
 
-### 5. The Operator is included explicitly
+The body of a draft is never logged. It can be long, and a draft is by definition
+unpublished, so it does not belong in a log that many people can read. The HTTP
+request itself is not logged in the controller either: `UseSerilogRequestLogging()`
+already writes one entry per request with method, path, status code and duration,
+and the trace covers the same ground.
 
-`include *` only shows people with a relationship to the element in focus. The
-Operator only interacts with the Monitoring System, so both views contain
-`include operator`; without it the Operator would be missing from both diagrams.
+### 5. The controller does not know Serilog
+
+The controller takes the `ILogger<DraftsController>` that .NET provides, through
+dependency injection. Only the Observability library knows that the entries end up
+in Seq, so replacing the logging tool does not touch any controller.
+
+### 6. Database tracing comes from Npgsql itself
+
+`OpenTelemetry.Instrumentation.EntityFrameworkCore` exists only as a prerelease
+package. Npgsql, the PostgreSQL driver the services already use, emits its own
+spans, so the setup subscribes to them with `AddSource("Npgsql")` instead. The
+result is the same: one span per database call.
+
+### 7. Addresses are configuration, not code
+
+The Observability library reads the Seq and Zipkin addresses from configuration,
+with defaults matching the names in `docker-compose.yml`. The addresses are set per
+service in `docker-compose.yml`, so they can be changed without rebuilding.
+
+### 8. Seq runs without authentication
+
+Newer versions of Seq refuse to start without an admin password, so the container
+sets `SEQ_FIRSTRUN_NOAUTHENTICATION`. This is a development setup on a private
+Docker network; a real deployment would set a password instead.
 
 ## Known gaps (Week 4)
 
-- The monitoring is modelled, not implemented; no service sends data yet
-- The container diagram has many crossing arrows now that nine containers point to
-  TelemetryCollector
+- Only DraftService sends log entries and traces; the other services still have to
+  adopt the Observability library, and the diagrams show only what is built
+- Metrics are not collected, only logs and traces; the dashboard mock-up for this
+  week's other assignment relies mostly on metrics
+- Seq and Zipkin store their data inside the containers, so `docker compose down
+  -v` discards it
+- Nothing alerts anyone; the Operator has to look

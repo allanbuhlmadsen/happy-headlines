@@ -58,6 +58,19 @@ services:
       retries: 10
       start_period: 30s
 
+  db-drafts:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: drafts
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d drafts"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   articleservice:
     build:
       context: .
@@ -106,3 +119,33 @@ services:
       - "8083:8080"
     depends_on:
       db-comments: *db-ready
+
+  draftservice:
+    build:
+      context: .
+      dockerfile: DraftService/Dockerfile
+    environment:
+      ConnectionStrings__Drafts: "Host=db-drafts;Port=5432;Database=drafts;Username=postgres;Password=devpassword"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+    ports:
+      - "8084:8080"
+    depends_on:
+      db-drafts: *db-ready
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
+
+  seq:
+    image: datalust/seq:latest
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
+    ports:
+      - "5341:80"
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      - "9411:9411"

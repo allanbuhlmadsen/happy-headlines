@@ -4,11 +4,12 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         # ---------- People ----------
         publisher = person "Publisher" "Journalist or editor who drafts and publishes articles."
         reader = person "Reader" "Reads articles, posts comments, and subscribes to the newsletter."
-        operator = person "Operator" "Developer on call who watches the monitoring dashboard and handles incidents."
+        operator = person "Operator" "Developer on call who reads the log entries and traces and handles incidents."
 
         # ---------- External systems ----------
         emailSystem = softwareSystem "Email System" "Delivers the newsletter to subscribers' inboxes." "External"
-        monitoringSystem = softwareSystem "Monitoring System" "Bought, not built (Grafana stack). Stores metrics, logs, and traces, shows the dashboard, and sends alerts." "External"
+        seq = softwareSystem "Seq" "Bought, not built. Stores the structured log entries from the services and shows them in a browser." "External"
+        zipkin = softwareSystem "Zipkin" "Bought, not built. Stores the traces from the services and shows each request as a timeline." "External"
 
         # ---------- Happy Headlines ----------
         happyHeadlines = softwareSystem "Happy Headlines" "Positive news platform: drafting, publishing, reading, commenting, and the newsletter." {
@@ -25,9 +26,6 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             commentService = container "CommentService" "Receives, filters, and stores comments."
             subscriberService = container "SubscriberService" "Handles sign-ups and subscriber data."
             newsletterService = container "NewsletterService" "Assembles and sends the daily newsletter."
-
-            # --- Monitoring ---
-            telemetryCollector = container "TelemetryCollector" "Bought, not built (OpenTelemetry Collector). Collects metrics, logs, and traces from all services and forwards them." "OpenTelemetry Collector"
 
             # --- Queues ---
             articleQueue = container "ArticleQueue" "Carries approved articles from publishing to storage." "" "Queue"
@@ -75,25 +73,18 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         profanityService -> profanityDatabase "Retrieves and removes prohibited words"
 
         # ---------- Relationships: monitoring ----------
-        webapp -> telemetryCollector "Sends metrics, logs, and traces to"
-        website -> telemetryCollector "Sends metrics, logs, and traces to"
-        draftService -> telemetryCollector "Sends metrics, logs, and traces to"
-        publisherService -> telemetryCollector "Sends metrics, logs, and traces to"
-        profanityService -> telemetryCollector "Sends metrics, logs, and traces to"
-        articleService -> telemetryCollector "Sends metrics, logs, and traces to"
-        commentService -> telemetryCollector "Sends metrics, logs, and traces to"
-        subscriberService -> telemetryCollector "Sends metrics, logs, and traces to"
-        newsletterService -> telemetryCollector "Sends metrics, logs, and traces to"
-        telemetryCollector -> monitoringSystem "Forwards metrics, logs, and traces to"
-        operator -> monitoringSystem "Watches the dashboard in"
-        monitoringSystem -> operator "Alerts about incidents"
+        draftService -> seq "Sends log entries to"
+        draftService -> zipkin "Sends traces to"
+        operator -> seq "Reads log entries in"
+        operator -> zipkin "Reads traces in"
 
         # ---------- System-level relationships (level 1) ----------
         # Implied relationships are disabled, so these are stated explicitly.
         publisher -> happyHeadlines "Drafts and publishes articles"
         reader -> happyHeadlines "Reads articles, posts comments, and subscribes to the newsletter"
         happyHeadlines -> emailSystem "Sends the newsletter"
-        happyHeadlines -> monitoringSystem "Sends metrics, logs, and traces to"
+        happyHeadlines -> seq "Sends log entries to"
+        happyHeadlines -> zipkin "Sends traces to"
 
         # ---------- Deployment ----------
         deploymentEnvironment "Docker Compose" {
