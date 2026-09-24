@@ -78,6 +78,9 @@ services:
     environment:
       Databases__Template: "Host={host};Port=5432;Database=articles;Username=postgres;Password=devpassword"
       Databases__Continents: "africa,antarctica,asia,europe,northamerica,oceania,southamerica,global"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+      Rabbit__Host: "rabbitmq"
     depends_on:
       db-africa: *db-ready
       db-antarctica: *db-ready
@@ -87,6 +90,12 @@ services:
       db-oceania: *db-ready
       db-southamerica: *db-ready
       db-global: *db-ready
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   loadbalancer:
     image: nginx:alpine
@@ -103,10 +112,16 @@ services:
       dockerfile: ProfanityService/Dockerfile
     environment:
       ConnectionStrings__Profanity: "Host=db-profanity;Port=5432;Database=profanity;Username=postgres;Password=devpassword"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
     ports:
       - "8082:8080"
     depends_on:
       db-profanity: *db-ready
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
 
   commentservice:
     build:
@@ -115,10 +130,16 @@ services:
     environment:
       ConnectionStrings__Comments: "Host=db-comments;Port=5432;Database=comments;Username=postgres;Password=devpassword"
       Services__Profanity: "http://profanityservice:8080"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
     ports:
       - "8083:8080"
     depends_on:
       db-comments: *db-ready
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
 
   draftservice:
     build:
@@ -137,6 +158,61 @@ services:
       zipkin:
         condition: service_started
 
+  publisherservice:
+    build:
+      context: .
+      dockerfile: PublisherService/Dockerfile
+    environment:
+      Rabbit__Host: "rabbitmq"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+    ports:
+      - "8085:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
+
+  newsletterservice:
+    build:
+      context: .
+      dockerfile: NewsletterService/Dockerfile
+    environment:
+      Rabbit__Host: "rabbitmq"
+      Services__Articles: "http://loadbalancer:8080"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+    ports:
+      - "8086:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
+
+  webapp:
+    build:
+      context: .
+      dockerfile: Webapp/Dockerfile
+    environment:
+      Services__Publisher: "http://publisherservice:8080"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+    ports:
+      - "8087:8080"
+    depends_on:
+      publisherservice:
+        condition: service_started
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
+
   seq:
     image: datalust/seq:latest
     environment:
@@ -149,3 +225,18 @@ services:
     image: openzipkin/zipkin:latest
     ports:
       - "9411:9411"
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s

@@ -12,6 +12,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["ArticleService/ArticleService.csproj", "ArticleService/"]
+COPY ["Observability/Observability.csproj", "Observability/"]
 RUN dotnet restore "./ArticleService/ArticleService.csproj"
 COPY . .
 WORKDIR "/src/ArticleService"

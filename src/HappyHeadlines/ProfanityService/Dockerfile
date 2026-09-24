@@ -12,6 +12,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["ProfanityService/ProfanityService.csproj", "ProfanityService/"]
+COPY ["Observability/Observability.csproj", "Observability/"]
 RUN dotnet restore "./ProfanityService/ProfanityService.csproj"
 COPY . .
 WORKDIR "/src/ProfanityService"

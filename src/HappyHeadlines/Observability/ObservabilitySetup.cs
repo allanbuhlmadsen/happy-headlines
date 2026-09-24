@@ -37,6 +37,7 @@ public static class ObservabilitySetup
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddSource("Npgsql")
+                .AddSource(MessageTracing.ActivitySourceName)
                 .AddZipkinExporter(options =>
                     options.Endpoint = new Uri(zipkinUrl)));
 

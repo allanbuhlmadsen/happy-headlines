@@ -1,4 +1,5 @@
-
+using ArticleService.Messaging;
+using Observability;
 using ArticleService.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,9 +10,14 @@ namespace ArticleService
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            builder.AddObservability("ArticleService");
+
             builder.Services.AddDbContextFactory<ArticleDbContext>();
 
             builder.Services.AddSingleton<ContinentDbContextFactory>();
+
+            builder.Services.AddHostedService<ArticleQueueListener>();
 
             // Add services to the container.
 
@@ -20,6 +26,8 @@ namespace ArticleService
             builder.Services.AddOpenApi();
 
             var app = builder.Build();
+
+            app.UseObservability();
 
             using (var scope = app.Services.CreateScope())
             {

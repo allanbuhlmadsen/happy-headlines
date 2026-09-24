@@ -1,4 +1,4 @@
-
+using Observability;
 using CommentService.Data;
 using CommentService.Services;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +13,8 @@ namespace CommentService
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            builder.AddObservability("CommentService");
 
             builder.Services.AddHttpClient<ProfanityClient>(client =>
             {
@@ -42,6 +44,8 @@ namespace CommentService
             builder.Services.AddOpenApi();
 
             var app = builder.Build();
+
+            app.UseObservability();
 
             using (var scope = app.Services.CreateScope())
             {

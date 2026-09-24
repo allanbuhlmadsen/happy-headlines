@@ -15,20 +15,20 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         happyHeadlines = softwareSystem "Happy Headlines" "Positive news platform: drafting, publishing, reading, commenting, and the newsletter." {
 
             # --- Front ends ---
-            webapp = container "Webapp" "Editorial front end where the Publisher drafts and publishes articles."
+            webapp = container "Webapp" "Editorial front end where the Publisher drafts and publishes articles." "Razor Pages"
             website = container "Website" "Public front end where the Reader reads articles, comments, and subscribes."
 
             # --- Services ---
-            draftService = container "DraftService" "Stores and retrieves drafts."
-            publisherService = container "PublisherService" "Finalises the publication of an article."
-            profanityService = container "ProfanityService" "Filters inappropriate language in articles and comments."
-            articleService = container "ArticleService" "Delivers articles to the Website and the NewsletterService."
-            commentService = container "CommentService" "Receives, filters, and stores comments."
+            draftService = container "DraftService" "Stores and retrieves drafts." "REST API"
+            publisherService = container "PublisherService" "Finalises the publication of an article." "REST API"
+            profanityService = container "ProfanityService" "Filters inappropriate language in articles and comments." "REST API"
+            articleService = container "ArticleService" "Delivers articles to the Website and the NewsletterService." "REST API"
+            commentService = container "CommentService" "Receives, filters, and stores comments." "REST API"
             subscriberService = container "SubscriberService" "Handles sign-ups and subscriber data."
-            newsletterService = container "NewsletterService" "Assembles and sends the daily newsletter."
+            newsletterService = container "NewsletterService" "Assembles and sends the daily newsletter." "REST API"
 
             # --- Queues ---
-            articleQueue = container "ArticleQueue" "Carries approved articles from publishing to storage." "" "Queue"
+            articleQueue = container "ArticleQueue" "Carries approved articles to everyone who subscribes: a copy for storage and a copy for the newsletter." "RabbitMQ fanout exchange" "Queue"
             subscriberQueue = container "SubscriberQueue" "Carries new sign-ups." "" "Queue"
 
             # --- Databases ---
@@ -47,6 +47,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         publisherService -> profanityService "Requests filtering of the article text"
         publisherService -> articleQueue "Places the approved article on"
         articleQueue -> articleService "Delivers new articles to"
+        articleQueue -> newsletterService "Delivers new articles to"
         articleService -> articleDatabase "Stores and retrieves articles"
 
         # ---------- Relationships: reading ----------
@@ -73,8 +74,21 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         profanityService -> profanityDatabase "Retrieves and removes prohibited words"
 
         # ---------- Relationships: monitoring ----------
+        # Every container that runs our own code uses the Observability library.
+        webapp -> seq "Sends log entries to"
+        webapp -> zipkin "Sends traces to"
         draftService -> seq "Sends log entries to"
         draftService -> zipkin "Sends traces to"
+        publisherService -> seq "Sends log entries to"
+        publisherService -> zipkin "Sends traces to"
+        articleService -> seq "Sends log entries to"
+        articleService -> zipkin "Sends traces to"
+        newsletterService -> seq "Sends log entries to"
+        newsletterService -> zipkin "Sends traces to"
+        commentService -> seq "Sends log entries to"
+        commentService -> zipkin "Sends traces to"
+        profanityService -> seq "Sends log entries to"
+        profanityService -> zipkin "Sends traces to"
         operator -> seq "Reads log entries in"
         operator -> zipkin "Reads traces in"
 
@@ -150,7 +164,12 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
 
         container happyHeadlines "Level2_Containers" "The system's containers and how they interact." {
             include *
-            include operator
+            exclude seq zipkin operator
+            autolayout lr
+        }
+
+        container happyHeadlines "Level2_Monitoring" "Which containers send log entries and traces, and where they go." {
+            include webapp draftService publisherService articleService newsletterService commentService profanityService seq zipkin operator
             autolayout lr
         }
 

@@ -1,4 +1,4 @@
-
+using Observability;
 using Microsoft.EntityFrameworkCore;
 using ProfanityService.Data;
 
@@ -10,6 +10,8 @@ namespace ProfanityService
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            builder.AddObservability("ProfanityService");
+
             builder.Services.AddDbContext<ProfanityDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("Profanity")));
 
@@ -20,6 +22,8 @@ namespace ProfanityService
             builder.Services.AddOpenApi();
 
             var app = builder.Build();
+
+            app.UseObservability();
 
             using (var scope = app.Services.CreateScope())
             {
