@@ -6,6 +6,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Events;
+using Prometheus;
 
 namespace Observability;
 
@@ -44,10 +45,12 @@ public static class ObservabilitySetup
         return builder;
     }
 
-    // One log entry per HTTP request, with method, path, status code and duration.
+    // One log entry per HTTP request, with method, path, status code and duration,
+    // and the numbers Prometheus comes to read.
     public static WebApplication UseObservability(this WebApplication app)
     {
         app.UseSerilogRequestLogging();
+        app.MapMetrics();
         return app;
     }
 }

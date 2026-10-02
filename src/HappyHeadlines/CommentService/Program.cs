@@ -1,3 +1,4 @@
+using CommentService.Caching;
 using Observability;
 using CommentService.Data;
 using CommentService.Services;
@@ -37,7 +38,7 @@ namespace CommentService
             builder.Services.AddDbContext<CommentDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("Comments")));
 
-            // Add services to the container.
+            builder.Services.AddSingleton<CommentCache>();
 
             builder.Services.AddControllers();
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi

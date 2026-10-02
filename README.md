@@ -21,7 +21,9 @@ Architecture and implementation work for the Happy Headlines semester project.
         ├── PublisherService/  Publishing, onto the queue (Week 5)
         ├── NewsletterService/ Newsletter, off the queue (Week 5)
         ├── Webapp/            Editorial front end, Razor Pages (Week 5)
-        └── nginx/             Load balancer configuration
+        ├── nginx/             Load balancer configuration
+        ├── prometheus/        Metrics collection (Week 6)
+        └── grafana/           Dashboard, provisioned from files (Week 6)
 ```
 
 ---
@@ -585,3 +587,111 @@ Seven containers now send log entries and traces, which is fourteen arrows. On t
 - NewsletterService only logs the articles it receives from the queue, since it has no database to keep them in
 - RabbitMQ runs with the default `guest` user and password, like the database passwords from Week 2
 - Consumers are not idempotent: a redelivered message would store the article a second time
+
+---
+
+# Week 6 — Cache layers
+
+The assignment: the global ArticleDatabase sits in North America and is not replicated, so European readers wait for every article. The Architectural Review Board rejected an X-axis split of the database on cost and approved cache layers instead. Two were to be built — one between ArticleService and the global ArticleDatabase, filled by an offline process with the articles of the last 14 days, and one between CommentService and CommentDatabase, filled on a cache miss, holding all comments for the 30 most recently accessed articles and cleaned up with the LRU algorithm — together with a small dashboard showing the hit ratio of each.
+
+## What was built
+
+| Part | File | Role |
+| --- | --- | --- |
+| ArticleCache | `ArticleService/Caching/ArticleCache.cs` | Holds the global articles of the last 14 days, keyed by article id. The whole contents are replaced at once, never one entry at a time. |
+| ArticleCacheRefresher | `ArticleService/Caching/ArticleCacheRefresher.cs` | The offline process. A `BackgroundService` that reads the last 14 days of global articles every 30 seconds and hands them to the cache. |
+| CommentCache | `CommentService/Caching/CommentCache.cs` | Holds all comments for the 30 most recently requested articles, keyed by continent and article id, with LRU eviction. |
+| CacheMetrics | `Observability/CacheMetrics.cs` | Counts hits, misses and entries for both caches and exposes them to Prometheus. |
+| Prometheus | `prometheus/prometheus.yml` | Collects the numbers from every service instance every five seconds. |
+| Grafana | `grafana/provisioning/`, `grafana/dashboards/cache.json` | The dashboard, loaded from the repository rather than kept inside the container. |
+
+The two cache layers are drawn as components in `docs/workspace.dsl`, in the views `Level3_ArticleCache` and `Level3_CommentCache`. They are the first level 3 diagrams in the model, because a cache that lives inside a service cannot be shown at the container level.
+
+| Level | Diagram | Key / legend |
+| --- | --- | --- |
+| 3 — ArticleService | `docs/images/Level3_ArticleCache.png` | `docs/images/Level3_ArticleCache-key.png` |
+| 3 — CommentService | `docs/images/Level3_CommentCache.png` | `docs/images/Level3_CommentCache-key.png` |
+
+## How to run
+
+From `src/HappyHeadlines`:
+
+```
+docker compose up --build
+```
+
+| Address | What it is |
+| --- | --- |
+| <http://localhost:8080> | Articles, through the load balancer |
+| <http://localhost:8083> | Comments |
+| <http://localhost:9090> | Prometheus: `Status > Targets` shows which instances are being collected from |
+| <http://localhost:3000> | Grafana: the dashboard *Cache* |
+
+The settings that the assignment states as numbers are in `docker-compose.yml`, not in the code: `ArticleCache__Days: "14"`, `ArticleCache__RefreshSeconds: "30"` and `CommentCache__Articles: "30"`.
+
+The hit ratio is this query, once per cache:
+
+```
+sum(happyheadlines_cache_lookups_total{result="hit"}) by (cache)
+/
+sum(happyheadlines_cache_lookups_total) by (cache)
+```
+
+## Design decisions
+
+### 1. The caches are written by hand, not Redis or Memcached
+
+The assignment states both limits as counts: the articles of the last 14 days, and the 30 most recently accessed articles. Neither Redis nor Memcached can express that. They evict when they run out of memory, so the number of entries follows from how large the entries happen to be, and "exactly 30 articles" would have had to be enforced in our own code anyway.
+
+The second reason is where the cache sits. ArticleService runs as three instances, and an in-process cache gives each instance a copy in its own region — which is the entire point of the story the assignment tells, where the problem is the distance from Europe to a database in North America. A shared Redis would sit in one place and be one more network hop away from two of the three instances.
+
+The price is paid under "Known gaps": the three instances have three separate caches, and each one is empty after a restart.
+
+### 2. Two different ways of filling a cache, deliberately
+
+The article cache is filled by an offline process, so a reader never pays for the first request: the articles are already there when the request arrives. It costs a fixed amount of database work every 30 seconds whether anyone reads or not, which is affordable because the data set is small and bounded by 14 days.
+
+The comment cache is filled by the request itself. The first reader of an article pays the full price and everyone after that is served from memory. It costs nothing when nobody reads, which matters because comments are not bounded: all comments for all articles would be far too much to keep.
+
+The dashboard shows the difference as two numbers. The article cache sits at 100 per cent, because the cache was filled before anyone asked. The comment cache cannot reach 100 per cent by design: the first request for every article is a miss.
+
+### 3. The article cache covers the global database only, and only lookups by id
+
+The assignment says the cache goes between ArticleService and the global ArticleDatabase, so a request for an article in Europe or Asia goes straight to that continent's database as before. The list endpoint is also left alone, because it must keep showing every article; the cache only holds the last 14 days, and answering a request for all articles from it would silently drop the older ones.
+
+### 4. Writing or deleting a comment empties that article's entry
+
+`CommentsController` calls `Remove` after `SaveChangesAsync` on both `Post` and `Delete`. Without it, a reader who posted a comment would not see their own comment, because the cache would keep answering with the list from before the write.
+
+The article cache needs nothing similar: the offline process replaces the whole contents on its next run.
+
+### 5. LRU as a linked list plus a dictionary
+
+The dictionary finds an entry by key without searching, and the linked list keeps the order of use, with the most recently used at the front. A lookup moves its node to the front, and an insertion that overflows removes the node at the back. Both are single operations that do not depend on how many entries the cache holds, which is the reason for keeping two structures instead of, for instance, sorting a list by a timestamp on every lookup.
+
+### 6. prometheus-net, not the OpenTelemetry exporter
+
+OpenTelemetry's Prometheus exporter for ASP.NET Core is still a prerelease package. `prometheus-net.AspNetCore` is a release, and the choice follows Week 4, decision 6, where the same reasoning kept the project on release packages. `MapMetrics()` in `ObservabilitySetup` opens `/metrics` in every service that uses the shared library, so both caches were reachable from Prometheus the moment they existed.
+
+The counters are static fields, so every instance of `CacheMetrics` in a process writes into the same registry — which is what makes one endpoint able to report both caches, or several caches in one service.
+
+### 7. Prometheus finds the ArticleService instances through DNS
+
+ArticleService runs as three containers behind Nginx, and Prometheus collects from each service directly rather than through the load balancer: a load-balanced request would have returned one instance's numbers at random. `dns_sd_configs` asks Docker's own DNS for the addresses behind the name `articleservice` and collects from every one it gets back, so the configuration does not have to be changed when the number of instances changes. CommentService runs as a single container and is listed as a static target.
+
+This is also the reason the dashboard adds up the instances with `sum(...) by (cache)`: without it, every panel would show one line per container.
+
+### 8. The dashboard lives in the repository, not in Grafana
+
+Grafana keeps dashboards in a database inside its own container, and the container has no named volume, so a `docker compose down` would take the dashboard with it. `grafana/dashboards/cache.json` is the dashboard as a file, and `grafana/provisioning/dashboards/dashboards.yml` tells Grafana to read it at start-up — the same arrangement as the Prometheus data source, which has been provisioned from a file since it was set up.
+
+`allowUiUpdates: true` keeps the dashboard editable in the browser. Without it Grafana locks a provisioned dashboard, which is what happens to the data source: it has no "Save & test" button, only "Test".
+
+## Known gaps (Week 6)
+
+- The caches live in memory inside each service instance. They are empty after a restart, and the three ArticleService instances hold three separate copies, so `happyheadlines_cache_entries` is the sum across instances rather than the size of one cache
+- A new global article is only in the cache after the next run of the offline process, so it can be up to 30 seconds old before it can be served from cache
+- The hit ratio gauge counts every lookup since the service started, so a period of poor hit rate keeps weighing on the number long after it is over. The second panel, which measures over the last five minutes, is there for that reason
+- Nothing limits the memory the caches use. The limits are 14 days and 30 articles, and a very long list of comments is still one entry
+- Prometheus and Grafana are open without authentication, and Grafana's login form is disabled, in the same spirit as the database passwords from Week 2
+- There are no tests of the LRU behaviour; the eviction was verified by hand, by requesting 31 articles and reading the log line that names the entry that was removed

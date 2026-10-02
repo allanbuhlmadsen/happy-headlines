@@ -1,4 +1,5 @@
-﻿using CommentService.Data;
+﻿using CommentService.Caching;
+using CommentService.Data;
 using CommentService.Models;
 using CommentService.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -15,22 +16,37 @@ public class CommentsController : ControllerBase
 {
     private readonly CommentDbContext _db;
     private readonly ProfanityClient _profanity;
+    private readonly CommentCache _cache;
 
-    public CommentsController(CommentDbContext db, ProfanityClient profanity)
+    public CommentsController(
+        CommentDbContext db, ProfanityClient profanity, CommentCache cache)
     {
         _db = db;
         _profanity = profanity;
+        _cache = cache;
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Comment>>> GetForArticle(
-        string continent, int articleId)
+    string continent, int articleId)
     {
-        return await _db.Comments
+        var key = CommentCache.KeyFor(continent, articleId);
+
+        if (_cache.TryGet(key, out var cached))
+        {
+            return cached!;
+        }
+
+        // A miss, so the database is asked and the answer is kept.
+        var comments = await _db.Comments
             .Where(c => c.ArticleContinent == continent.ToLowerInvariant()
                      && c.ArticleId == articleId)
             .OrderBy(c => c.PostedAt)
             .ToListAsync();
+
+        _cache.Set(key, comments);
+
+        return comments;
     }
 
     [HttpPost]
@@ -69,6 +85,8 @@ public class CommentsController : ControllerBase
 
         _db.Comments.Add(comment);
         await _db.SaveChangesAsync();
+
+        _cache.Remove(CommentCache.KeyFor(continent, articleId));
 
         return CreatedAtAction(nameof(GetForArticle),
             new { continent, articleId }, comment);

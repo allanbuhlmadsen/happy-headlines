@@ -1,4 +1,5 @@
-﻿using ArticleService.Data;
+﻿using ArticleService.Caching;
+using ArticleService.Data;
 using ArticleService.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,10 +11,12 @@ namespace ArticleService.Controllers;
 public class ArticlesController : ControllerBase
 {
     private readonly ContinentDbContextFactory _factory;
+    private readonly ArticleCache _cache;
 
-    public ArticlesController(ContinentDbContextFactory factory)
+    public ArticlesController(ContinentDbContextFactory factory, ArticleCache cache)
     {
         _factory = factory;
+        _cache = cache;
     }
 
     [HttpGet]
@@ -29,6 +32,14 @@ public class ArticlesController : ControllerBase
     public async Task<ActionResult<Article>> GetById(string continent, int id)
     {
         if (!_factory.IsValid(continent)) return NotFound();
+
+        // Only the global database sits in North America, so only that one
+        // has a cache in front of it.
+        if (continent.ToLowerInvariant() == "global"
+            && _cache.TryGet(id, out var cached))
+        {
+            return cached!;
+        }
 
         using var db = _factory.Create(continent);
         var article = await db.Articles.FindAsync(id);

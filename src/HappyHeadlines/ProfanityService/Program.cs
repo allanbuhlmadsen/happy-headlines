@@ -15,8 +15,6 @@ namespace ProfanityService
             builder.Services.AddDbContext<ProfanityDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("Profanity")));
 
-            // Add services to the container.
-
             builder.Services.AddControllers();
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();

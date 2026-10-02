@@ -1,3 +1,4 @@
+using ArticleService.Caching;
 using ArticleService.Messaging;
 using Observability;
 using ArticleService.Data;
@@ -12,16 +13,19 @@ namespace ArticleService
             var builder = WebApplication.CreateBuilder(args);
 
             builder.AddObservability("ArticleService");
-
+            
             builder.Services.AddDbContextFactory<ArticleDbContext>();
-
+            
             builder.Services.AddSingleton<ContinentDbContextFactory>();
-
+            
             builder.Services.AddHostedService<ArticleQueueListener>();
-
-            // Add services to the container.
-
+            
+            builder.Services.AddSingleton<ArticleCache>();
+            
+            builder.Services.AddHostedService<ArticleCacheRefresher>();
+            
             builder.Services.AddControllers();
+            
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();
 

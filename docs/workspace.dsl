@@ -22,8 +22,15 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             draftService = container "DraftService" "Stores and retrieves drafts." "REST API"
             publisherService = container "PublisherService" "Finalises the publication of an article." "REST API"
             profanityService = container "ProfanityService" "Filters inappropriate language in articles and comments." "REST API"
-            articleService = container "ArticleService" "Delivers articles to the Website and the NewsletterService." "REST API"
-            commentService = container "CommentService" "Receives, filters, and stores comments." "REST API"
+            articleService = container "ArticleService" "Delivers articles to the Website and the NewsletterService." "REST API" {
+                articlesController = component "ArticlesController" "Takes the requests for articles and answers them." "ASP.NET Core controller"
+                articleCache = component "ArticleCache" "Holds the global articles from the last 14 days in memory. Read on every request for a global article." "C# Dictionary" "Cache"
+                articleCacheRefresher = component "ArticleCacheRefresher" "Offline process. Every 30 seconds it reads the last 14 days of global articles and replaces the contents of the cache." "BackgroundService"
+            }
+            commentService = container "CommentService" "Receives, filters, and stores comments." "REST API" {
+                commentsController = component "CommentsController" "Takes the requests for comments and answers them." "ASP.NET Core controller"
+                commentCache = component "CommentCache" "Holds all comments for the 30 most recently requested articles. Filled on a cache miss and emptied with the LRU algorithm." "C# LinkedList and Dictionary" "Cache"
+            }
             subscriberService = container "SubscriberService" "Handles sign-ups and subscriber data."
             newsletterService = container "NewsletterService" "Assembles and sends the daily newsletter." "REST API"
 
@@ -69,6 +76,17 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         newsletterService -> articleService "Fetches recent articles"
         newsletterService -> subscriberService "Fetches all active subscribers when sending"
         newsletterService -> emailSystem "Sends the newsletter"
+
+        # ---------- Relationships: caching (level 3) ----------
+        # The two cache layers sit inside the services, between the controller
+        # and the database. They are filled in two different ways.
+        articlesController -> articleCache "Looks the article up in"
+        articlesController -> articleDatabase "Reads the article from, when it is not in the cache"
+        articleCacheRefresher -> articleDatabase "Reads the last 14 days of global articles from"
+        articleCacheRefresher -> articleCache "Replaces the whole contents of"
+
+        commentsController -> commentCache "Looks the article's comments up in, puts them into, and removes them from"
+        commentsController -> commentDatabase "Reads the comments from, when they are not in the cache, and writes new comments to"
 
         # ---------- Relationships: filtering ----------
         profanityService -> profanityDatabase "Retrieves and removes prohibited words"
@@ -173,6 +191,16 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             autolayout lr
         }
 
+        component articleService "Level3_ArticleCache" "The cache layer between ArticleService and the global ArticleDatabase, filled by an offline process." {
+            include *
+            autolayout lr
+        }
+
+        component commentService "Level3_CommentCache" "The cache layer between CommentService and the CommentDatabase, filled on a cache miss." {
+            include *
+            autolayout lr
+        }
+
         deployment happyHeadlines "Docker Compose" "Deployment" "How the services and their databases are actually run." {
             include *
             autolayout lr
@@ -205,6 +233,15 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
                 shape pipe
                 background #438dd5
                 color #ffffff
+            }
+            element "Component" {
+                background #85bbf0
+                color #000000
+            }
+            element "Cache" {
+                shape hexagon
+                background #f5a623
+                color #000000
             }
         }
 

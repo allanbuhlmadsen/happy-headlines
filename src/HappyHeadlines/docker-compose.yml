@@ -81,6 +81,8 @@ services:
       Observability__SeqUrl: "http://seq:80"
       Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
       Rabbit__Host: "rabbitmq"
+      ArticleCache__Days: "14"
+      ArticleCache__RefreshSeconds: "30"
     depends_on:
       db-africa: *db-ready
       db-antarctica: *db-ready
@@ -132,6 +134,7 @@ services:
       Services__Profanity: "http://profanityservice:8080"
       Observability__SeqUrl: "http://seq:80"
       Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+      CommentCache__Articles: "30"
     ports:
       - "8083:8080"
     depends_on:
@@ -240,3 +243,25 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
