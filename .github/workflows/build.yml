@@ -1,0 +1,42 @@
+name: Build and publish
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service:
+          - { image: articleservice,    folder: ArticleService }
+          - { image: commentservice,    folder: CommentService }
+          - { image: profanityservice,  folder: ProfanityService }
+          - { image: draftservice,      folder: DraftService }
+          - { image: publisherservice,  folder: PublisherService }
+          - { image: newsletterservice, folder: NewsletterService }
+          - { image: webapp,            folder: Webapp }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: src/HappyHeadlines
+          file: src/HappyHeadlines/${{ matrix.service.folder }}/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/allanbuhlmadsen/happyheadlines-${{ matrix.service.image }}:1.0.${{ github.run_number }}
+            ghcr.io/allanbuhlmadsen/happyheadlines-${{ matrix.service.image }}:latest
