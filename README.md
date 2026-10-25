@@ -6,6 +6,9 @@ Architecture and implementation work for the Happy Headlines semester project.
 
 ```
 ├── README.md
+├── .github/
+│   └── workflows/
+│       └── build.yml      Build and publish pipeline (Week 7)
 ├── docs/
 │   ├── workspace.dsl          C4 model (Structurizr DSL)
 │   └── images/                Exported diagrams
@@ -695,3 +698,67 @@ Grafana keeps dashboards in a database inside its own container, and the contain
 - Nothing limits the memory the caches use. The limits are 14 days and 30 articles, and a very long list of comments is still one entry
 - Prometheus and Grafana are open without authentication, and Grafana's login form is disabled, in the same spirit as the database passwords from Week 2
 - There are no tests of the LRU behaviour; the eviction was verified by hand, by requesting 31 articles and reading the log line that names the entry that was removed
+
+---
+
+# Week 7 — Continuous integration and delivery
+
+The assignment: build a pipeline that automatically builds and delivers every service whenever something arrives on the main branch, and store the Docker images with a version number in a central registry.
+
+## What was built
+
+One workflow, `.github/workflows/build.yml`, running on GitHub Actions. Every push to `main` builds the seven services that have a Dockerfile — ArticleService, CommentService, ProfanityService, DraftService, PublisherService, NewsletterService and Webapp — and pushes each image to the GitHub Container Registry at `ghcr.io/allanbuhlmadsen/happyheadlines-<service>`.
+
+Each image is pushed with two tags: `1.0.<run number>`, which counts up on its own, and `latest`.
+
+Observability has no Dockerfile. It is a class library and is compiled into the seven images that use it.
+
+## Where to see it
+
+| Address | What it is |
+| --- | --- |
+| <https://github.com/allanbuhlmadsen/happy-headlines/actions> | The runs, with one job per service |
+| <https://github.com/allanbuhlmadsen/happy-headlines/packages> | The seven images and their versions |
+
+To pull one of them:
+
+```
+docker pull ghcr.io/allanbuhlmadsen/happyheadlines-articleservice:latest
+```
+
+## Design decisions
+
+### 1. One workflow with a matrix, not seven workflows
+
+The seven services are built the same way and differ only in two values: the folder the Dockerfile lives in, and the name the image is published under. A matrix states those two values per service and runs the same three steps for each, in parallel. Seven separate workflow files would have been seven places to change when a step changes.
+
+### 2. Every service is built on every push
+
+Building only the service that changed would be faster, but the services share the Observability library. A change there would then be compiled into one image and not the other six, and the mismatch would first show at runtime. This is the first row of the week's FMEA analysis, and building everything is the mitigation.
+
+### 3. The build context is the same as in docker-compose.yml
+
+`docker-compose.yml` builds each service with the solution folder as context and `<Service>/Dockerfile` as the file. The workflow uses the same two values, seen from the root of the repository, so an image built by the pipeline is built exactly as one built locally.
+
+### 4. The version number comes from the run number
+
+`1.0.${{ github.run_number }}` counts up by itself and needs nothing kept in sync by hand. `latest` is pushed alongside it so `docker compose` can pull the newest image without knowing the number. Keeping every numbered version in the registry is what makes a rollback possible at all: the previous version is still there to deploy.
+
+### 5. The pipeline delivers, it does not deploy
+
+The workflow stops at the registry. Nothing reaches a running environment by itself, so no go/no-go barrier condition is bypassed. Deployment is a separate step, and the barrier conditions belong in it.
+
+### 6. No stored credentials
+
+`secrets.GITHUB_TOKEN` is created by GitHub for each run and expires with it, so the pipeline itself keeps no secret. `permissions: packages: write` is what allows that token to push to the registry.
+
+## Known gaps (Week 7)
+
+The week's FMEA analysis identified nine failure modes for this project. The pipeline addresses two of them — all services are built on every push, and images are versioned so a rollback has something to roll back to. The following are deliberately left for the step from delivery to deployment:
+
+- No test stage, because there is no unit test library to run
+- No performance test before an image is published
+- Database migrations still run at service startup, so a schema change can make a rollback impossible
+- No feature can be disabled on its own; markdown logic is not implemented
+- Nothing compares the production numbers with the previous release after a deployment
+- Database passwords and the RabbitMQ user are still committed in `docker-compose.yml`
