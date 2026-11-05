@@ -10,6 +10,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         emailSystem = softwareSystem "Email System" "Delivers the newsletter to subscribers' inboxes." "External"
         seq = softwareSystem "Seq" "Bought, not built. Stores the structured log entries from the services and shows them in a browser." "External"
         zipkin = softwareSystem "Zipkin" "Bought, not built. Stores the traces from the services and shows each request as a timeline." "External"
+        featureHub = softwareSystem "FeatureHub" "Bought, not built. Holds the release toggles and pushes a change out to the services while they run." "External"
 
         # ---------- Happy Headlines ----------
         happyHeadlines = softwareSystem "Happy Headlines" "Positive news platform: drafting, publishing, reading, commenting, and the newsletter." {
@@ -31,12 +32,12 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
                 commentsController = component "CommentsController" "Takes the requests for comments and answers them." "ASP.NET Core controller"
                 commentCache = component "CommentCache" "Holds all comments for the 30 most recently requested articles. Filled on a cache miss and emptied with the LRU algorithm." "C# LinkedList and Dictionary" "Cache"
             }
-            subscriberService = container "SubscriberService" "Handles sign-ups and subscriber data."
+            subscriberService = container "SubscriberService" "Handles sign-ups and subscriber data. The whole service sits behind a release toggle." "REST API"
             newsletterService = container "NewsletterService" "Assembles and sends the daily newsletter." "REST API"
 
             # --- Queues ---
             articleQueue = container "ArticleQueue" "Carries approved articles to everyone who subscribes: a copy for storage and a copy for the newsletter." "RabbitMQ fanout exchange" "Queue"
-            subscriberQueue = container "SubscriberQueue" "Carries new sign-ups." "" "Queue"
+            subscriberQueue = container "SubscriberQueue" "Carries new sign-ups." "RabbitMQ fanout exchange" "Queue"
 
             # --- Databases ---
             draftDatabase = container "DraftDatabase" "Drafts." "" "Database"
@@ -74,7 +75,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         subscriberService -> subscriberQueue "Places the new sign-up on"
         subscriberQueue -> newsletterService "Delivers new sign-ups to"
         newsletterService -> articleService "Fetches recent articles"
-        newsletterService -> subscriberService "Fetches all active subscribers when sending"
+        newsletterService -> subscriberService "Fetches all active subscribers when sending, behind a circuit breaker"
         newsletterService -> emailSystem "Sends the newsletter"
 
         # ---------- Relationships: caching (level 3) ----------
@@ -107,8 +108,16 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         commentService -> zipkin "Sends traces to"
         profanityService -> seq "Sends log entries to"
         profanityService -> zipkin "Sends traces to"
+        subscriberService -> seq "Sends log entries to"
+        subscriberService -> zipkin "Sends traces to"
         operator -> seq "Reads log entries in"
         operator -> zipkin "Reads traces in"
+
+        # ---------- Relationships: release toggles ----------
+        # Both services read the same flag, so the subscriber feature is turned
+        # on and off as a whole, without either of them being redeployed.
+        subscriberService -> featureHub "Reads the release toggle from"
+        newsletterService -> featureHub "Reads the release toggle from"
 
         # ---------- System-level relationships (level 1) ----------
         # Implied relationships are disabled, so these are stated explicitly.
@@ -117,6 +126,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         happyHeadlines -> emailSystem "Sends the newsletter"
         happyHeadlines -> seq "Sends log entries to"
         happyHeadlines -> zipkin "Sends traces to"
+        happyHeadlines -> featureHub "Reads release toggles from"
 
         # ---------- Deployment ----------
         deploymentEnvironment "Docker Compose" {
@@ -187,7 +197,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         }
 
         container happyHeadlines "Level2_Monitoring" "Which containers send log entries and traces, and where they go." {
-            include webapp draftService publisherService articleService newsletterService commentService profanityService seq zipkin operator
+            include webapp draftService publisherService articleService newsletterService commentService profanityService subscriberService seq zipkin operator
             autolayout lr
         }
 

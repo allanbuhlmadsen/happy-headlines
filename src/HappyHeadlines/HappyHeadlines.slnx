@@ -10,5 +10,6 @@
   <Project Path="Observability/Observability.csproj" Id="51fbc3ab-ce73-44ae-94ec-f33cade89909" />
   <Project Path="ProfanityService/ProfanityService.csproj" Id="5000fc18-336c-4da9-8108-c9fdc47f2265" />
   <Project Path="PublisherService/PublisherService.csproj" Id="6b1067f0-7d1b-42dc-a397-a7196e44fba1" />
+  <Project Path="SubscriberService/SubscriberService.csproj" Id="7b20b6bd-2faa-403d-9c41-1cc152cd086b" />
   <Project Path="Webapp/Webapp.csproj" Id="a54d2994-4255-4f0d-aeff-de2851ff409a" />
 </Solution>

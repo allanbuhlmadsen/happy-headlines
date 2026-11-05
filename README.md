@@ -23,6 +23,7 @@ Architecture and implementation work for the Happy Headlines semester project.
         ├── Observability/     Shared Serilog and OpenTelemetry setup (Week 4)
         ├── PublisherService/  Publishing, onto the queue (Week 5)
         ├── NewsletterService/ Newsletter, off the queue (Week 5)
+        ├── SubscriberService/ Subscribers, behind a release toggle (Week 8)
         ├── Webapp/            Editorial front end, Razor Pages (Week 5)
         ├── nginx/             Load balancer configuration
         ├── prometheus/        Metrics collection (Week 6)
@@ -76,7 +77,7 @@ The system contains 16 containers:
 - **Queues (2)** — ArticleQueue, SubscriberQueue
 - **Databases (5)** — DraftDatabase, ArticleDatabase, CommentDatabase, ProfanityDatabase, SubscriberDatabase
 
-Three external systems: an **Email System** that delivers the newsletter, **Seq**, which stores and shows log entries, and **Zipkin**, which stores and shows traces.
+Four external systems: an **Email System** that delivers the newsletter, **Seq**, which stores and shows log entries, **Zipkin**, which stores and shows traces, and **FeatureHub**, which holds the release toggles (Week 8).
 
 ## Notation
 
@@ -707,11 +708,11 @@ The assignment: build a pipeline that automatically builds and delivers every se
 
 ## What was built
 
-One workflow, `.github/workflows/build.yml`, running on GitHub Actions. Every push to `main` builds the seven services that have a Dockerfile — ArticleService, CommentService, ProfanityService, DraftService, PublisherService, NewsletterService and Webapp — and pushes each image to the GitHub Container Registry at `ghcr.io/allanbuhlmadsen/happyheadlines-<service>`.
+One workflow, `.github/workflows/build.yml`, running on GitHub Actions. Every push to `main` builds the services that have a Dockerfile — ArticleService, CommentService, ProfanityService, DraftService, PublisherService, NewsletterService, SubscriberService and Webapp — and pushes each image to the GitHub Container Registry at `ghcr.io/allanbuhlmadsen/happyheadlines-<service>`.
 
 Each image is pushed with two tags: `1.0.<run number>`, which counts up on its own, and `latest`.
 
-Observability has no Dockerfile. It is a class library and is compiled into the seven images that use it.
+Observability has no Dockerfile. It is a class library and is compiled into the images that use it.
 
 ## Where to see it
 
@@ -762,3 +763,118 @@ The week's FMEA analysis identified nine failure modes for this project. The pip
 - No feature can be disabled on its own; markdown logic is not implemented
 - Nothing compares the production numbers with the previous release after a deployment
 - Database passwords and the RabbitMQ user are still committed in `docker-compose.yml`
+
+---
+
+# Week 8 — SubscriberService, swimlanes and a release toggle
+
+The assignment: implement the SubscriberService with its own database and queue, keep it and the NewsletterService in separate swimlanes with fault isolation between them, and hide the SubscriberService behind a release toggle that can be turned on and off without redeploying the application — neither entirely nor partially. All services are to be part of the CI/CD pipeline. The Website is not required.
+
+## What was built
+
+| Part | File | Role |
+| --- | --- | --- |
+| SubscriberService | `SubscriberService/` | REST API for signing up, unsubscribing, and listing subscribers |
+| SubscriberDatabase | `db-subscribers` in `docker-compose.yml` | PostgreSQL 17, one row per subscriber |
+| SubscriberQueue | `SubscriberService/Messaging/SubscriberPublisher.cs` | A RabbitMQ fanout exchange named `subscribers`, carrying new sign-ups |
+| NewSubscriberListener | `NewsletterService/Messaging/NewSubscriberListener.cs` | Binds `subscriber-queue-newsletter` to that exchange and sends the welcome mail |
+| SubscriberClient | `NewsletterService/Services/SubscriberClient.cs` | Fetches the subscriber list over HTTP, behind a circuit breaker |
+| FeatureHub | `featurehub` in `docker-compose.yml` | Holds the flag `SUBSCRIBERS_ENABLED` and pushes changes out while the services run |
+
+## API
+
+| Method | Route | Action |
+| --- | --- | --- |
+| `GET` | `/subscribers` | Lists every subscriber. Asked for by NewsletterService when a newsletter is sent |
+| `GET` | `/subscribers/{id}` | One subscriber |
+| `POST` | `/subscribers` | Signs up. Stores the subscriber and places them on the queue |
+| `DELETE` | `/subscribers/{id}` | Unsubscribes, by deleting the row |
+
+Unsubscribing deletes the row rather than marking it inactive, which is what the Week 1 model describes with "Removing a subscriber". Every row in the table is therefore an active subscriber.
+
+NewsletterService also gained `POST /newsletter/{continent}/send`, which fetches the articles of a continent and the subscriber list and reports how many recipients the newsletter went to. The existing `GET /newsletter/{continent}` is unchanged.
+
+## How to run
+
+From `src/HappyHeadlines`:
+
+```
+docker compose up -d
+```
+
+| Address | What it is |
+| --- | --- |
+| <http://localhost:8088> | SubscriberService |
+| <http://localhost:8086> | NewsletterService |
+| <http://localhost:8090> | FeatureHub: the flag `SUBSCRIBERS_ENABLED` |
+| <http://localhost:15672> | RabbitMQ, user `guest`, password `guest` |
+
+To see the toggle work, turn `SUBSCRIBERS_ENABLED` off in FeatureHub and call the three endpoints again. `GET /subscribers` and `POST /newsletter/europe/send` answer 503; `GET /newsletter/europe` still works. No container is restarted, no image is rebuilt, and no environment variable is changed.
+
+## Design decisions
+
+### 1. The flag is read on every request, not at startup
+
+`toggles["SUBSCRIBERS_ENABLED"].IsEnabled` is evaluated each time a request arrives. The FeatureHub SDK keeps an open connection to the server and updates its copy of the value the moment the flag is flipped in the browser, so the new value is in effect on the next request.
+
+Reading the flag once at startup would have been simpler and would have satisfied "turned off" — but not "without redeploying", because the service would have to be restarted to notice. That is the whole point of the requirement, and it is why a setting in `appsettings.json` or an environment variable in `docker-compose.yml` is not an answer: both need a restart.
+
+### 2. A middleware in SubscriberService, individual checks in NewsletterService
+
+In SubscriberService the check sits in a middleware in front of every endpoint, so the whole service is off with one flip and no endpoint can be forgotten. That is the "entirely" half of the requirement.
+
+In NewsletterService there is no middleware, because the service must keep working when the flag is off — it has articles to deal with as well. The check sits in the two places that concern subscribers: before the call to SubscriberService in `Send`, and in the queue listener. That is the "partially" half: the feature is switched off across the system, not the service.
+
+The check in `Send` is placed before the HTTP call rather than after it. When the feature is off, NewsletterService does not spend a network call finding out something it already knows.
+
+### 3. FeatureHub rather than a toggle of our own
+
+The course points at FeatureHub, and it is what makes requirement "without redeploying" straightforward: a server that holds the flags and pushes changes to the SDK over an open connection. The alternative — a row in a database that each service polls — would have been fewer moving parts but would have meant writing the distribution mechanism ourselves.
+
+The cost is one more container, one more SDK, and a new dependency at startup, which is listed under "Known gaps".
+
+### 4. The two services share a flag, but no code
+
+`Subscriber` is defined separately in SubscriberService and in NewsletterService, and the FeatureHub setup is repeated in both. The duplication is deliberate and is the same decision as Week 3, decision 6: a shared library would couple the two services at build time, which works directly against the fault isolation this week's assignment asks for.
+
+What they do share is the flag itself, which lives outside both of them in FeatureHub.
+
+### 5. The circuit breaker is what makes the swimlanes hold
+
+NewsletterService calls SubscriberService over HTTP, and a synchronous call between two lanes is exactly what a swimlane is supposed to prevent — unless it is guarded. The call therefore goes through the same circuit breaker arrangement as Week 3: `Microsoft.Extensions.Http.Resilience`, opening at half the calls in a 30-second window, after at least four calls, staying open for 15 seconds.
+
+Measured with SubscriberService stopped:
+
+| | Response time |
+| --- | --- |
+| Before the breaker opens | 857 ms |
+| After the breaker opens | 3–5 ms |
+
+While this was happening, the call to ArticleService answered 200 every time: NewsletterService kept working on everything that did not involve subscribers. When SubscriberService was started again, the breaker closed on its own and the newsletter could be sent, without NewsletterService being touched.
+
+There is deliberately no `depends_on` for `subscriberservice` under `newsletterservice` in `docker-compose.yml`. NewsletterService must be able to start and run without its neighbour.
+
+### 6. The subscriber is stored before the message is sent
+
+`SaveChangesAsync` comes first, `PublishAsync` second. In the other order, NewsletterService could send a welcome mail to a subscriber that was never stored, if the database failed a moment later.
+
+The exchange is a fanout, like the article exchange from Week 5, so SubscriberService knows nothing about who listens. Today that is NewsletterService alone.
+
+### 7. A message that arrives while the flag is off is acknowledged and dropped
+
+The listener checks the flag and, when it is off, acknowledges the message without sending a welcome mail. The alternative was to put the message back in the queue, but it would return immediately, be refused again, and spin for as long as the flag was off.
+
+The case is rare: when the flag is off, SubscriberService answers 503 to everything, so no new subscribers can be created and no new messages appear. It can only happen to a message that was already in flight when the flag was flipped.
+
+### 8. One line in the pipeline
+
+Adding SubscriberService to the CI/CD pipeline from Week 7 is a single line in the matrix in `.github/workflows/build.yml`. That was the point of building the workflow as a matrix rather than as one file per service.
+
+## Known gaps (Week 8)
+
+- SubscriberService and NewsletterService read the flag once at startup to build their FeatureHub context, and fail to start if FeatureHub cannot be reached. The toggle has therefore made FeatureHub a startup dependency of two services
+- The FeatureHub API key is committed in plain text in `docker-compose.yml`, like the database passwords from Week 2
+- The welcome mail is a log entry. The Email System is outside the system boundary in the C4 model and is not built
+- The Website is not built, so sign-ups happen through the API rather than through a page, as the assignment allows
+- The deployment diagram still shows only Week 2 and Week 3
+- There are no tests

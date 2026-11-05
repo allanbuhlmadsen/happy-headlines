@@ -71,6 +71,19 @@ services:
       retries: 10
       start_period: 30s
 
+  db-subscribers:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: subscribers
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d subscribers"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   articleservice:
     build:
       context: .
@@ -186,6 +199,9 @@ services:
     environment:
       Rabbit__Host: "rabbitmq"
       Services__Articles: "http://loadbalancer:8080"
+      Services__Subscribers: "http://subscriberservice:8080"
+      FeatureHub__Url: "http://featurehub:8085"
+      FeatureHub__ApiKey: "90f60c1a-c618-4643-9cf7-5ee42de8dce2/e3fwK2CYqTMeUc7A99n9GUNi6HcKHin00lVAKHxG"
       Observability__SeqUrl: "http://seq:80"
       Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
     ports:
@@ -196,6 +212,32 @@ services:
       seq:
         condition: service_started
       zipkin:
+        condition: service_started
+      featurehub:
+        condition: service_started
+
+  subscriberservice:
+    build:
+      context: .
+      dockerfile: SubscriberService/Dockerfile
+    environment:
+      ConnectionStrings__Subscribers: "Host=db-subscribers;Port=5432;Database=subscribers;Username=postgres;Password=devpassword"
+      Rabbit__Host: "rabbitmq"
+      FeatureHub__Url: "http://featurehub:8085"
+      FeatureHub__ApiKey: "90f60c1a-c618-4643-9cf7-5ee42de8dce2/e3fwK2CYqTMeUc7A99n9GUNi6HcKHin00lVAKHxG"
+      Observability__SeqUrl: "http://seq:80"
+      Observability__ZipkinUrl: "http://zipkin:9411/api/v2/spans"
+    ports:
+      - "8088:8080"
+    depends_on:
+      db-subscribers: *db-ready
+      rabbitmq:
+        condition: service_healthy
+      seq:
+        condition: service_started
+      zipkin:
+        condition: service_started
+      featurehub:
         condition: service_started
 
   webapp:
@@ -265,3 +307,13 @@ services:
     depends_on:
       prometheus:
         condition: service_started
+
+  featurehub:
+    image: featurehub/party-server:latest
+    volumes:
+      - featurehub-db:/db
+    ports:
+      - "8090:8085"
+
+volumes:
+  featurehub-db:
