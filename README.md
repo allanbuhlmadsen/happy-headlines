@@ -878,3 +878,207 @@ Adding SubscriberService to the CI/CD pipeline from Week 7 is a single line in t
 - The Website is not built, so sign-ups happen through the API rather than through a page, as the assignment allows
 - The deployment diagram still shows only Week 2 and Week 3
 - There are no tests
+
+---
+
+# Week 9 — Green Architecture Framework
+
+The assignment: pick three tactics from the Green Architecture Framework that the project has not already been working on, improve Happy Headlines with them, and document the work with before and after code snippets.
+
+## Which three, and why these
+
+Three GAF tactics are already covered by earlier weeks and are therefore out of scope for this one: *Cache Data Closer to the User* is the two cache layers from Week 6, *Utilize Geographical Sharding* is the Z-axis split with one database per continent from Week 2, and *Independent Scaling of Modular Architecture* is the X-axis split and the separate services.
+
+The three chosen are from three different categories of the framework:
+
+| Tactic | GAF category |
+| --- | --- |
+| Reduce Network Package Size | Avoid Unnecessary Resources |
+| Use Efficient Algorithms | Utilize an Efficient Technology |
+| Reduce Logging | Accept Lower Fidelity |
+
+Each change was measured before and after, which is the framework's own first process tactic, *Measure and Experiment*. The measurements were taken against 20 articles with a realistic body length, 200,000 comments, and ten newsletter requests.
+
+| Tactic | Before | After | Change |
+| --- | --- | --- | --- |
+| Reduce Network Package Size | 20,069 bytes | 4,762 bytes | 76 per cent less |
+| Use Efficient Algorithms | Seq Scan, 28.907 ms | Index Scan, 0.397 ms | 73 times faster |
+| Reduce Logging | 213 log lines | 26 log lines | 88 per cent fewer |
+
+---
+
+## 1. Reduce Network Package Size
+
+`GET /continents/{continent}/articles` returned the whole article, body included, for every article in the list. Nothing that calls it uses the body: NewsletterService counts the articles, and a front page would show headlines.
+
+**Before** — `ArticleService/Controllers/ArticlesController.cs`:
+
+```csharp
+[HttpGet]
+public async Task<ActionResult<IEnumerable<Article>>> GetAll(string continent)
+{
+    if (!_factory.IsValid(continent)) return NotFound();
+
+    using var db = _factory.Create(continent);
+    return await db.Articles.ToListAsync();
+}
+```
+
+**After** — a list model without the body, projected in the query itself:
+
+```csharp
+// What a list of articles needs. The body is deliberately left out: it is by
+// far the largest field, and no caller of the list endpoint uses it.
+public record ArticleSummary(
+    int Id,
+    string Title,
+    string Author,
+    DateTime PublishedAt,
+    string Continent);
+
+[HttpGet]
+public async Task<ActionResult<IEnumerable<ArticleSummary>>> GetAll(string continent)
+{
+    if (!_factory.IsValid(continent)) return NotFound();
+
+    using var db = _factory.Create(continent);
+
+    return await db.Articles
+        .AsNoTracking()
+        .Select(a => new ArticleSummary(
+            a.Id, a.Title, a.Author, a.PublishedAt, a.Continent))
+        .ToListAsync();
+}
+```
+
+The saving happens in three places, not one. `Select` is translated by Entity Framework Core into `SELECT "Id", "Title", "Author", "PublishedAt", "Continent"` instead of `SELECT *`, so the body is never read from disk, never held in memory in the service, and never sent over the network. `AsNoTracking` is there for the same reason as in `ArticleCacheRefresher` from Week 6: the rows are only read, so change tracking is wasted work.
+
+**Measured** with 20 articles of about 720 characters each, using `(Invoke-WebRequest -Uri "http://localhost:8080/continents/global/articles" -UseBasicParsing).RawContentLength`:
+
+| | Response size |
+| --- | --- |
+| Before | 20,069 bytes |
+| After | 4,762 bytes |
+
+---
+
+## 2. Use Efficient Algorithms
+
+The GAF description of this tactic names database indexes explicitly. `CommentsController` looks up an article's comments on every page view, filtering on two columns and sorting by a third, and none of them were indexed.
+
+**Before** — `CommentService/Data/CommentDbContext.cs`:
+
+```csharp
+public class CommentDbContext : DbContext
+{
+    public CommentDbContext(DbContextOptions<CommentDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Comment> Comments => Set<Comment>();
+}
+```
+
+**After** — one index covering the whole query:
+
+```csharp
+public class CommentDbContext : DbContext
+{
+    public CommentDbContext(DbContextOptions<CommentDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Comment> Comments => Set<Comment>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // Every lookup of an article's comments filters on the first two
+        // columns and sorts by the third, so the index covers the whole query.
+        modelBuilder.Entity<Comment>()
+            .HasIndex(c => new { c.ArticleContinent, c.ArticleId, c.PostedAt });
+    }
+}
+```
+
+The migration this produces, applied at service start-up like every other migration in the project:
+
+```csharp
+migrationBuilder.CreateIndex(
+    name: "IX_Comments_ArticleContinent_ArticleId_PostedAt",
+    table: "Comments",
+    columns: new[] { "ArticleContinent", "ArticleId", "PostedAt" });
+```
+
+The order of the three columns is the whole point. The two that are filtered on come first. The third is the one that is sorted by, and including it means the rows already come out of the index in the right order, so the database skips the sort as well.
+
+**Measured** with 200,000 comments spread over 5,000 articles, using the query the controller actually makes.
+
+Before:
+
+```
+ Sort  (cost=3833.51..3833.52 rows=1 width=53) (actual time=28.850..28.856 rows=40 loops=1)
+   Sort Key: "PostedAt"
+   ->  Seq Scan on "Comments"  (cost=0.00..3833.50 rows=1 width=53) (actual time=0.279..28.712 rows=40 loops=1)
+         Filter: (("ArticleContinent" = 'europe'::text) AND ("ArticleId" = 4242))
+         Rows Removed by Filter: 200030
+ Execution Time: 28.907 ms
+```
+
+After:
+
+```
+ Index Scan using "IX_Comments_ArticleContinent_ArticleId_PostedAt" on "Comments"  (cost=0.29..77.35 rows=40 width=45) (actual time=0.126..0.326 rows=40 loops=1)
+   Index Cond: (("ArticleContinent" = 'europe'::text) AND ("ArticleId" = 4242))
+ Execution Time: 0.397 ms
+```
+
+Reading 200,030 rows to find 40 became reading 40. The `Sort` step disappeared entirely, as intended.
+
+---
+
+## 3. Reduce Logging
+
+.NET's own `HttpClient` logging writes four entries for every outgoing call: "Start processing", "Sending", "Received response headers" and "End processing". Every service makes such calls constantly — and sending traces to Zipkin is itself an HTTP call, so the monitoring produced four log lines about itself every time it reported anything.
+
+**Before** — `Observability/ObservabilitySetup.cs`:
+
+```csharp
+builder.Host.UseSerilog((context, logger) => logger
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+```
+
+**After** — one more override:
+
+```csharp
+builder.Host.UseSerilog((context, logger) => logger
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("System.Net.Http.HttpClient", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+```
+
+Nothing is lost that is not recorded better elsewhere. Zipkin already has every one of those calls as a span with duration and status, which is what a span is for, and `UseSerilogRequestLogging` still writes one entry per incoming request with method, path, status code and duration. This is the same argument as Week 4, decision 4, where the controller does not log the request because the middleware already does.
+
+Because the setup lives in the shared Observability library, the single line applies to all ten services at once.
+
+**Measured** on NewsletterService, counting log lines after a fresh start and ten requests to `GET /newsletter/europe`:
+
+| | Log lines |
+| --- | --- |
+| Before | 213 |
+| After | 26 |
+
+The saving is not only disk in Seq. Every line was serialised, written to the console, and shipped over the network to Seq.
+
+## Known gaps (Week 9)
+
+- The three tactics were measured on a laptop, in response size, query time and log volume. They were not measured in energy or CO₂, which the framework's *Measure and Experiment* tactic would call for with an energy lab
+- `GET /subscribers` still returns every subscriber at once, and the article list is still unpaginated. *Defer Fetching/Lazy Fetch* is the obvious next tactic
+- No index was added for the duplicate check on `Email` in SubscriberService, which is the same problem as the comment lookup, on a table that is still small
+- Responses are not compressed; *Use Low-footprint Data Formats* weighs compression cost against transfer saving and was not examined

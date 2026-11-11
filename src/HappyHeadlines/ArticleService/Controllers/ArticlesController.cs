@@ -6,6 +6,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ArticleService.Controllers;
 
+// What a list of articles needs. The body is deliberately left out: it is by
+// far the largest field, and no caller of the list endpoint uses it.
+public record ArticleSummary(
+    int Id,
+    string Title,
+    string Author,
+    DateTime PublishedAt,
+    string Continent);
+
 [ApiController]
 [Route("continents/{continent}/articles")]
 public class ArticlesController : ControllerBase
@@ -20,12 +29,17 @@ public class ArticlesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<Article>>> GetAll(string continent)
+    public async Task<ActionResult<IEnumerable<ArticleSummary>>> GetAll(string continent)
     {
         if (!_factory.IsValid(continent)) return NotFound();
 
         using var db = _factory.Create(continent);
-        return await db.Articles.ToListAsync();
+
+        return await db.Articles
+            .AsNoTracking()
+            .Select(a => new ArticleSummary(
+                a.Id, a.Title, a.Author, a.PublishedAt, a.Continent))
+            .ToListAsync();
     }
 
     [HttpGet("{id}")]

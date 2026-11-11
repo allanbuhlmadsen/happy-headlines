@@ -50,6 +50,8 @@ namespace CommentService.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ArticleContinent", "ArticleId", "PostedAt");
+
                     b.ToTable("Comments");
                 });
 #pragma warning restore 612, 618
