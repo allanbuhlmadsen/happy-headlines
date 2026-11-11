@@ -719,7 +719,7 @@ Observability has no Dockerfile. It is a class library and is compiled into the 
 | Address | What it is |
 | --- | --- |
 | <https://github.com/allanbuhlmadsen/happy-headlines/actions> | The runs, with one job per service |
-| <https://github.com/allanbuhlmadsen/happy-headlines/packages> | The seven images and their versions |
+| <https://github.com/allanbuhlmadsen/happy-headlines/packages> | The eight images and their versions |
 
 To pull one of them:
 

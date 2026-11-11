@@ -22,7 +22,7 @@ jobs:
           - { image: publisherservice,  folder: PublisherService }
           - { image: newsletterservice, folder: NewsletterService }
           - { image: webapp,            folder: Webapp }
-          - { image: subscriberservice,  folder: SubscriberService }
+          - { image: subscriberservice, folder: SubscriberService }
 
     steps:
       - uses: actions/checkout@v4
