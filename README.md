@@ -819,7 +819,7 @@ In SubscriberService the check sits in a middleware in front of every endpoint, 
 
 In NewsletterService there is no middleware, because the service must keep working when the flag is off — it has articles to deal with as well. The check sits in the two places that concern subscribers: before the call to SubscriberService in `Send`, and in the queue listener. That is the "partially" half: the feature is switched off across the system, not the service.
 
-The check in `Send` is placed before the HTTP call rather than after it. When the feature is off, NewsletterService does not spend a network call finding out something it already knows.
+The check in `Send` is placed before the call to SubscriberService rather than after it. When the feature is off, NewsletterService does not spend a network call finding out something it already knows.
 
 ### 3. FeatureHub rather than a toggle of our own
 

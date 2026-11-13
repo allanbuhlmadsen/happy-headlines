@@ -100,6 +100,9 @@ public class CommentsController : ControllerBase
 
         _db.Comments.Remove(comment);
         await _db.SaveChangesAsync();
+
+        _cache.Remove(CommentCache.KeyFor(continent, articleId));
+
         return NoContent();
     }
 }
