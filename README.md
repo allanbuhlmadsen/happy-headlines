@@ -522,19 +522,20 @@ docker compose up --build articleservice publisherservice newsletterservice weba
 
 ## The trace, end to end
 
-Publishing an article from the browser produces one trace of seven spans across four services and a database:
+Publishing an article from the browser produces one trace of eight spans across four services and the database, which Zipkin counts as a fifth service of its own:
 
 | Span | Service |
 | --- | --- |
-| post /index | Webapp |
-| post articles | Webapp, calling out |
-| post articles | PublisherService, receiving |
-| publish articles | PublisherService, onto the exchange |
-| receive article-queue-storage | ArticleService |
-| db-europe: postgresql | ArticleService, writing |
-| receive article-queue-newsletter | NewsletterService |
+| post /index | webapp |
+| post | webapp, calling out |
+| post articles | publisherservice, receiving |
+| publish articles | publisherservice, onto the exchange |
+| receive article-queue-newsletter | newsletterservice |
+| receive article-queue-storage | articleservice |
+| connect articles | db-europe, opening the connection |
+| postgresql | db-europe, writing |
 
-The two receives are siblings: one message, two subscribers, one trace.
+The two receives are siblings: one message, two subscribers, one trace. The `connect articles` span appears only when Npgsql has to open a new physical connection, which it does the first time an instance writes after start-up; on a later publish the connection comes from the pool and the trace has seven spans.
 
 ## Design decisions
 
