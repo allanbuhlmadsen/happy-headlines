@@ -44,27 +44,21 @@ A C4 model of the system described in the assignment, covering the context level
 | 2 — Containers | `docs/images/Level2_Containers.png` | `docs/images/Level2_Containers-key.png` |
 | 2 — Monitoring | `docs/images/Level2_Monitoring.png` | `docs/images/Level2_Monitoring-key.png` |
 
-A third diagram, added in Week 2, is described under "Deployment" below. Levels 1 and 2 were extended with logging and tracing in Week 4, described under "Week 4 — Design to be monitored" at the end of this file.
+A fourth diagram, added in Week 2, is described under "Deployment" below. Levels 1 and 2 were extended with logging and tracing in Week 4, described under "Week 4 — Design to be monitored" at the end of this file.
 
-All three are generated from a single model in `docs/workspace.dsl`, written in Structurizr DSL (a text format for describing C4 models). The key files explain what the shapes and colours mean.
+They are all generated from a single model in `docs/workspace.dsl`, written in Structurizr DSL (a text format for describing C4 models). The key files explain what the shapes and colours mean.
 
 ## How to view or regenerate
 
-Online, without installing anything:
-
-1. Open <https://structurizr.com/dsl>
-2. Clear the editor and paste the contents of `docs/workspace.dsl`
-3. Generate, then switch between the three views
-
-Note that the Structurizr cloud service, including this online editor and the `theme default` used by the workspace, reaches its end of life on 30 September 2026. After that date use the local option below.
-
-Locally with Docker:
+Locally with Docker, from the folder that contains `docs`:
 
 ```
 docker run -it --rm -p 8080:8080 -v /path/to/docs:/usr/local/structurizr structurizr/structurizr local
 ```
 
-Then open <http://localhost:8080>. Note that this uses the same port as the Week 2 load balancer, so do not run both at once.
+Then open <http://localhost:8080> and switch between the six views. Note that this uses the same port as the Week 2 load balancer, so do not run both at once.
+
+The online editor at <https://structurizr.com/dsl> was the simpler option earlier in the semester, but the Structurizr cloud service reached its end of life on 30 September 2026, so the local container above is the one to use.
 
 ## Model overview
 
@@ -120,7 +114,7 @@ Five of the seven services own exactly one database each. PublisherService and N
 
 Container technology fields are left empty. The description names no languages, frameworks, or database engines, so filling them in would be invention.
 
-Week 4 adds the first exceptions. DraftService is built this week, so its technology (REST API) is stated, and so is the technology of the Observability library it uses.
+Week 4 adds the first exceptions: DraftService is built there, so its technology (REST API) is stated, and so is the technology of the Observability library it uses. Later weeks add more as each container is built.
 
 ---
 
@@ -202,7 +196,7 @@ The assignment calls it "an eighth database". Treating it as one more valid valu
 
 A reader in Europe would presumably want European and global articles together, which means querying two databases and merging.
 
-This is deliberately left out. The assignment asks for four endpoints, each of which reaches one database. The merging rule is really a presentation concern, and the Website that would need it has not been built yet — implementing it now would mean guessing at a requirement we have not seen.
+This is deliberately left out. The assignment asks for four operations, each of which reaches one database. The merging rule is really a presentation concern, and the Website that would need it has not been built yet — implementing it now would mean guessing at a requirement we have not seen.
 
 When it is needed, the intended approach is for the caller to make two requests and merge, rather than having ArticleService do it. That keeps every service call scoped to a single database, which is what the Z-axis split is for.
 
@@ -277,7 +271,7 @@ Unchanged from Week 2. From `src/HappyHeadlines`:
 docker compose up --scale articleservice=3
 ```
 
-Fourteen containers start: eleven databases, three ArticleService instances, the load balancer, ProfanityService and CommentService.
+Sixteen containers start: ten databases, three ArticleService instances, the load balancer, ProfanityService and CommentService.
 
 | Service | Port on the host |
 |---|---|
@@ -528,7 +522,7 @@ docker compose up --build articleservice publisherservice newsletterservice weba
 
 ## The trace, end to end
 
-Publishing an article from the browser produces one trace of seven spans across five services:
+Publishing an article from the browser produces one trace of seven spans across four services and a database:
 
 | Span | Service |
 | --- | --- |
@@ -596,7 +590,7 @@ Seven containers now send log entries and traces, which is fourteen arrows. On t
 
 # Week 6 — Cache layers
 
-The assignment: the global ArticleDatabase sits in North America and is not replicated, so European readers wait for every article. The Architectural Review Board rejected an X-axis split of the database on cost and approved cache layers instead. Two were to be built — one between ArticleService and the global ArticleDatabase, filled by an offline process with the articles of the last 14 days, and one between CommentService and CommentDatabase, filled on a cache miss, holding all comments for the 30 most recently accessed articles and cleaned up with the LRU algorithm — together with a small dashboard showing the hit ratio of each.
+The assignment: the global ArticleDatabase sits in North America and is not replicated, so European readers wait for every article. The Architectural Review Board rejected an X-axis split of the database on cost and approved cache layers instead. Two were to be built — one between ArticleService and the global ArticleDatabase, filled by an offline process with the articles of the last 14 days, and one between CommentService and CommentDatabase, filled on a cache miss, holding all comments for the 30 most recently accessed articles and cleaned up with the least recently used (LRU) algorithm — together with a small dashboard showing the hit ratio of each.
 
 ## What was built
 
@@ -609,11 +603,11 @@ The assignment: the global ArticleDatabase sits in North America and is not repl
 | Prometheus | `prometheus/prometheus.yml` | Collects the numbers from every service instance every five seconds. |
 | Grafana | `grafana/provisioning/`, `grafana/dashboards/cache.json` | The dashboard, loaded from the repository rather than kept inside the container. |
 
-The two cache layers are drawn as components in `docs/workspace.dsl`, in the views `Level3_ArticleCache` and `Level3_CommentCache`. They are the first level 3 diagrams in the model, because a cache that lives inside a service cannot be shown at the container level.
+The two cache layers are drawn as components in `docs/workspace.dsl`, in the views `Level3_ArticleService` and `Level3_CommentCache`. They are the first level 3 diagrams in the model, because a cache that lives inside a service cannot be shown at the container level. The ArticleService view was later extended to the whole service, so it also shows the queue listener and the factory that selects a continent's database.
 
 | Level | Diagram | Key / legend |
 | --- | --- | --- |
-| 3 — ArticleService | `docs/images/Level3_ArticleCache.png` | `docs/images/Level3_ArticleCache-key.png` |
+| 3 — ArticleService | `docs/images/Level3_ArticleService.png` | `docs/images/Level3_ArticleService-key.png` |
 | 3 — CommentService | `docs/images/Level3_CommentCache.png` | `docs/images/Level3_CommentCache-key.png` |
 
 ## How to run
@@ -729,13 +723,13 @@ docker pull ghcr.io/allanbuhlmadsen/happyheadlines-articleservice:latest
 
 ## Design decisions
 
-### 1. One workflow with a matrix, not seven workflows
+### 1. One workflow with a matrix, not eight workflows
 
-The seven services are built the same way and differ only in two values: the folder the Dockerfile lives in, and the name the image is published under. A matrix states those two values per service and runs the same three steps for each, in parallel. Seven separate workflow files would have been seven places to change when a step changes.
+The eight services are built the same way and differ only in two values: the folder the Dockerfile lives in, and the name the image is published under. A matrix states those two values per service and runs the same three steps for each, in parallel. Eight separate workflow files would have been eight places to change when a step changes.
 
 ### 2. Every service is built on every push
 
-Building only the service that changed would be faster, but the services share the Observability library. A change there would then be compiled into one image and not the other six, and the mismatch would first show at runtime. This is the first row of the week's FMEA analysis, and building everything is the mitigation.
+Building only the service that changed would be faster, but the services share the Observability library. A change there would then be compiled into one image and not the other seven, and the mismatch would first show at runtime. This is the first row of the week's failure mode and effects analysis (FMEA), and building everything is the mitigation.
 
 ### 3. The build context is the same as in docker-compose.yml
 
@@ -760,7 +754,7 @@ The week's FMEA analysis identified nine failure modes for this project. The pip
 - No test stage, because there is no unit test library to run
 - No performance test before an image is published
 - Database migrations still run at service startup, so a schema change can make a rollback impossible
-- No feature can be disabled on its own; markdown logic is not implemented
+- No feature can be disabled on its own; markdown logic is not implemented — addressed in Week 8 with the release toggle
 - Nothing compares the production numbers with the previous release after a deployment
 - Database passwords and the RabbitMQ user are still committed in `docker-compose.yml`
 
@@ -883,7 +877,7 @@ Adding SubscriberService to the CI/CD pipeline from Week 7 is a single line in t
 
 # Week 9 — Green Architecture Framework
 
-The assignment: pick three tactics from the Green Architecture Framework that the project has not already been working on, improve Happy Headlines with them, and document the work with before and after code snippets.
+The assignment: pick three tactics from the Green Architecture Framework (GAF) that the project has not already been working on, improve Happy Headlines with them, and document the work with before and after code snippets.
 
 ## Which three, and why these
 
@@ -897,7 +891,7 @@ The three chosen are from three different categories of the framework:
 | Use Efficient Algorithms | Utilize an Efficient Technology |
 | Reduce Logging | Accept Lower Fidelity |
 
-Each change was measured before and after, which is the framework's own first process tactic, *Measure and Experiment*. The measurements were taken against 20 articles with a realistic body length, 200,000 comments, and ten newsletter requests.
+Each change was measured before and after, which is the framework's own first process tactic, *Measure and Experiment*. The measurements were taken against 20 articles with a realistic body length, about 200,000 comments, and ten newsletter requests.
 
 | Tactic | Before | After | Change |
 | --- | --- | --- | --- |
@@ -1013,7 +1007,7 @@ migrationBuilder.CreateIndex(
 
 The order of the three columns is the whole point. The two that are filtered on come first. The third is the one that is sorted by, and including it means the rows already come out of the index in the right order, so the database skips the sort as well.
 
-**Measured** with 200,000 comments spread over 5,000 articles, using the query the controller actually makes.
+**Measured** with about 200,000 comments spread over 5,000 articles, using the query the controller actually makes.
 
 Before:
 
@@ -1065,7 +1059,7 @@ builder.Host.UseSerilog((context, logger) => logger
 
 Nothing is lost that is not recorded better elsewhere. Zipkin already has every one of those calls as a span with duration and status, which is what a span is for, and `UseSerilogRequestLogging` still writes one entry per incoming request with method, path, status code and duration. This is the same argument as Week 4, decision 4, where the controller does not log the request because the middleware already does.
 
-Because the setup lives in the shared Observability library, the single line applies to all ten services at once.
+Because the setup lives in the shared Observability library, the single line applies to all eight projects at once.
 
 **Measured** on NewsletterService, counting log lines after a fresh start and ten requests to `GET /newsletter/europe`:
 

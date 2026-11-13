@@ -24,7 +24,9 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             publisherService = container "PublisherService" "Finalises the publication of an article." "REST API"
             profanityService = container "ProfanityService" "Filters inappropriate language in articles and comments." "REST API"
             articleService = container "ArticleService" "Delivers articles to the Website and the NewsletterService." "REST API" {
-                articlesController = component "ArticlesController" "Takes the requests for articles and answers them." "ASP.NET Core controller"
+                articlesController = component "ArticlesController" "Takes the requests for articles and answers them. Five endpoints, all scoped to a continent." "ASP.NET Core controller"
+                articleQueueListener = component "ArticleQueueListener" "Receives approved articles from the queue and stores them. Acknowledges only once the article is written." "BackgroundService"
+                continentDbContextFactory = component "ContinentDbContextFactory" "Knows the eight continent names, validates them, and builds a database context for one of them. The coordination component of the Z-axis split." "C# class"
                 articleCache = component "ArticleCache" "Holds the global articles from the last 14 days in memory. Read on every request for a global article." "C# Dictionary" "Cache"
                 articleCacheRefresher = component "ArticleCacheRefresher" "Offline process. Every 30 seconds it reads the last 14 days of global articles and replaces the contents of the cache." "BackgroundService"
             }
@@ -82,9 +84,16 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
         # The two cache layers sit inside the services, between the controller
         # and the database. They are filled in two different ways.
         articlesController -> articleCache "Looks the article up in"
-        articlesController -> articleDatabase "Reads the article from, when it is not in the cache"
-        articleCacheRefresher -> articleDatabase "Reads the last 14 days of global articles from"
         articleCacheRefresher -> articleCache "Replaces the whole contents of"
+
+        # Nothing inside ArticleService reaches a database on its own. Every
+        # component asks the factory, which is what keeps the Z-axis split in
+        # one place.
+        articlesController -> continentDbContextFactory "Asks for a context for the continent in the route"
+        articleQueueListener -> continentDbContextFactory "Asks for a context for the article's continent"
+        articleCacheRefresher -> continentDbContextFactory "Asks for a context for the global database"
+        continentDbContextFactory -> articleDatabase "Creates a context pointed at that continent's database"
+        articleQueue -> articleQueueListener "Delivers new articles to"
 
         commentsController -> commentCache "Looks the article's comments up in, puts them into, and removes them from"
         commentsController -> commentDatabase "Reads the comments from, when they are not in the cache, and writes new comments to"
@@ -201,7 +210,7 @@ workspace "Happy Headlines" "C4 model: context, containers, and deployment" {
             autolayout lr
         }
 
-        component articleService "Level3_ArticleCache" "The cache layer between ArticleService and the global ArticleDatabase, filled by an offline process." {
+        component articleService "Level3_ArticleService" "Inside ArticleService: the controller, the queue listener, the cache and its offline refresher, and the factory that picks a continent's database." {
             include *
             autolayout lr
         }
